@@ -2,24 +2,17 @@ const userRepo = require('../../database/repositories/userRepo');
 const paymentRepo = require('../../database/repositories/paymentRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const productRepo = require('../../database/repositories/productRepo');
+const orderRepo = require('../../database/repositories/orderRepo');
 const uiHelper = require('../../utils/uiHelper');
 const { isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
+const masterMenu = require('../keyboards/masterMenu');
 
 module.exports = (bot) => {
     bot.action('master_panel', isMasterAdmin, async (ctx) => {
         try {
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '⚖️ Freigabe-Queue', callback_data: 'master_pending_approvals' }],
-                    [{ text: '👥 Admin-Verwaltung', callback_data: 'master_manage_admins' }],
-                    [{ text: '📢 Rundnachricht (Broadcast)', callback_data: 'master_start_broadcast' }],
-                    [{ text: '💳 Zahlungsarten', callback_data: 'master_manage_payments' }],
-                    [{ text: '📊 Kundenstatistik', callback_data: 'master_customer_overview' }],
-                    [{ text: '🛒 Zum Shop (Test)', callback_data: 'shop_menu' }]
-                ]
-            };
-            await uiHelper.updateOrSend(ctx, '👑 *Master-Dashboard*\nVolle Systemkontrolle:', keyboard);
+            const text = `Willkommen beim *Shop Bot*!\n\n👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
+            await uiHelper.updateOrSend(ctx, text, masterMenu());
         } catch (error) {
             console.error(error.message);
         }
@@ -57,7 +50,6 @@ module.exports = (bot) => {
             await paymentRepo.deletePaymentMethod(payId);
             await ctx.answerCbQuery('✅ Zahlungsart gelöscht');
             
-            // Refresh View
             const methods = await paymentRepo.getActivePaymentMethods();
             const keyboard = methods.map(m => ([{ text: `🗑 ${m.name}`, callback_data: `master_del_pay_${m.id}` }]));
             keyboard.push([{ text: '➕ Zahlungsart hinzufügen', callback_data: 'master_add_payment' }]);
@@ -103,6 +95,35 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, 'User gelöscht. Weitere Datensätze verwalten:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
+        }
+    });
+
+    bot.action('master_customer_overview', isMasterAdmin, async (ctx) => {
+        try {
+            const recentOrders = await orderRepo.getLatestOrders(10);
+
+            if (!recentOrders || recentOrders.length === 0) {
+                return uiHelper.updateOrSend(ctx, '📊 *Kundenübersicht*\n\nBisher wurden noch keine Bestellungen aufgegeben.', {
+                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
+                });
+            }
+
+            let text = '📊 *Die letzten 10 Bestellungen:*\n\n';
+            
+            recentOrders.forEach((order, index) => {
+                const date = new Date(order.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
+                const username = order.users?.username ? `@${order.users.username}` : `ID: ${order.user_id}`;
+                
+                text += `${index + 1}. *${username}*\n`;
+                text += `🗓 ${date} | 💰 ${parseFloat(order.total_amount).toFixed(2)}€\n\n`;
+            });
+
+            await uiHelper.updateOrSend(ctx, text, {
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
+            });
+        } catch (error) {
+            console.error('Customer Overview Error:', error.message);
+            await ctx.answerCbQuery('⚠️ Fehler beim Laden der Statistik.', { show_alert: true });
         }
     });
 

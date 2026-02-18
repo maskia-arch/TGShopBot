@@ -1,5 +1,6 @@
 const cartRepo = require('../../database/repositories/cartRepo');
 const paymentRepo = require('../../database/repositories/paymentRepo');
+const orderRepo = require('../../database/repositories/orderRepo');
 const uiHelper = require('../../utils/uiHelper');
 const notificationService = require('../../services/notificationService');
 const formatters = require('../../utils/formatters');
@@ -18,12 +19,10 @@ module.exports = (bot) => {
 
             const paymentMethods = await paymentRepo.getActivePaymentMethods();
 
-            // --- FALLBACK: Keine Zahlungsmethoden hinterlegt ---
             if (!paymentMethods || paymentMethods.length === 0) {
                 const cartTotal = await cartRepo.getCartTotal(userId);
                 const orderDetails = await cartRepo.getCartDetails(userId);
                 
-                // Wir simulieren eine "Manuelle" Zahlungsmethode für den Formatter
                 const manualMethod = { name: 'Privat-Chat / Manuelle Abwicklung', wallet_address: null };
                 
                 const text = "ℹ️ *Manuelle Zahlungsabwicklung*\n\n" +
@@ -38,7 +37,6 @@ module.exports = (bot) => {
                 return uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
             }
 
-            // --- NORMALER FLOW: Auswahl anzeigen ---
             const keyboard = paymentMethods.map(pm => ([{
                 text: pm.name,
                 callback_data: `payment_${pm.id}`
@@ -50,22 +48,24 @@ module.exports = (bot) => {
                 inline_keyboard: keyboard 
             });
         } catch (error) {
-            console.error("Checkout Error:", error.message);
+            console.error(error.message);
         }
     });
 
-    // Handler für Bestellungen ohne spezifische Zahlungsmethode
     bot.action('confirm_manual', async (ctx) => {
         try {
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
             const orderDetails = await cartRepo.getCartDetails(userId);
+            const cartTotal = await cartRepo.getCartTotal(userId);
             
+            await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
+
             await notificationService.notifyAdminsNewOrder({
                 userId,
                 username,
                 orderDetails,
-                paymentId: 'MANUAL' // Markierung für Admins
+                paymentId: 'MANUAL'
             });
 
             await cartRepo.clearCart(userId);
@@ -108,9 +108,12 @@ module.exports = (bot) => {
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
             
+            const cartTotal = await cartRepo.getCartTotal(userId);
             const orderDetails = await cartRepo.getCartDetails(userId);
             const paymentMethod = await paymentRepo.getPaymentMethod(paymentId);
             
+            await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
+
             await notificationService.notifyAdminsNewOrder({
                 userId,
                 username,
