@@ -3,18 +3,35 @@ const approvalRepo = require('../../database/repositories/approvalRepo');
 const uiHelper = require('../../utils/uiHelper');
 const { isAdmin } = require('../middlewares/auth');
 const formatters = require('../../utils/formatters');
+const config = require('../../config');
 
 module.exports = (bot) => {
     bot.action('admin_panel', isAdmin, async (ctx) => {
         try {
+            const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
+            
             const keyboard = {
                 inline_keyboard: [
                     [{ text: '📦 Produkte verwalten', callback_data: 'admin_manage_products' }],
                     [{ text: '📁 Kategorien verwalten', callback_data: 'admin_manage_categories' }],
+                    [{ text: '📢 Rundnachricht (Broadcast)', callback_data: 'admin_start_broadcast' }],
                     [{ text: '👁 Kundenansicht testen', callback_data: 'shop_menu' }]
                 ]
             };
+
+            if (isMaster) {
+                keyboard.inline_keyboard.unshift([{ text: '👑 Zum Master-Dashboard', callback_data: 'master_panel' }]);
+            }
+
             await uiHelper.updateOrSend(ctx, '🛠 *Admin-Zentrale*\nWas möchtest du tun?', keyboard);
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('admin_start_broadcast', isAdmin, async (ctx) => {
+        try {
+            await ctx.scene.enter('broadcastScene');
         } catch (error) {
             console.error(error.message);
         }

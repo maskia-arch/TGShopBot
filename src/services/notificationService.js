@@ -9,6 +9,64 @@ const init = (botInstance) => {
 };
 
 /**
+ * Sendet eine Nachricht an alle registrierten Kunden und meldet Fehler an Admins
+ */
+const sendBroadcast = async (messageText, senderId) => {
+    try {
+        const customers = await userRepo.getAllCustomers();
+        const admins = await userRepo.getAllAdmins();
+
+        let successCount = 0;
+        let failCount = 0;
+        const failedUsers = [];
+
+        // Nachricht an alle Kunden senden
+        for (const customer of customers) {
+            try {
+                await bot.telegram.sendMessage(customer.telegram_id, messageText, { 
+                    parse_mode: 'Markdown' 
+                });
+                successCount++;
+            } catch (error) {
+                // Fehlercodes für Blockierung oder gelöschte Chats abfangen
+                if (error.description.includes('forbidden') || error.description.includes('blocked') || error.description.includes('chat not found')) {
+                    failedUsers.push(customer);
+                }
+                failCount++;
+            }
+        }
+
+        // Ergebnisbericht erstellen
+        const report = `📢 *Broadcast Report*\n\n` +
+                       `✅ Erfolgreich: ${successCount}\n` +
+                       `❌ Fehlgeschlagen: ${failCount}\n\n` +
+                       `Gesendet von ID: ${senderId}`;
+
+        // Alle Admins und Master informieren
+        const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
+        const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
+
+        for (const staff of uniqueStaff) {
+            const keyboard = { inline_keyboard: [] };
+            
+            // Wenn es Fehler gab, dem Master direkt die Bereinigung anbieten
+            if (failCount > 0 && Number(staff.telegram_id) === Number(config.MASTER_ADMIN_ID)) {
+                keyboard.inline_keyboard.push([{ text: '🗑 Blockierte User bereinigen', callback_data: 'master_cleanup_blocked' }]);
+            }
+
+            await bot.telegram.sendMessage(staff.telegram_id, report, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard.inline_keyboard.length > 0 ? keyboard : undefined
+            }).catch(() => {});
+        }
+
+        return { successCount, failCount, failedUsers };
+    } catch (error) {
+        console.error('Broadcast Error:', error.message);
+    }
+};
+
+/**
  * Informiert Admins über eine neue Bestellung
  */
 const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId }) => {
@@ -35,7 +93,6 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
             ]
         };
 
-        // Nachricht an alle Admins und den Master senden
         const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
         const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
 
@@ -51,7 +108,7 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
 };
 
 /**
- * Informiert den Master-Admin über eine neue Freigabeanfrage (Löschen/Preis)
+ * Informiert den Master-Admin über eine neue Freigabeanfrage
  */
 const notifyMasterNewApproval = async (request) => {
     try {
@@ -83,6 +140,7 @@ const notifyMasterNewApproval = async (request) => {
 
 module.exports = {
     init,
+    sendBroadcast,
     notifyAdminsNewOrder,
     notifyMasterNewApproval
 };

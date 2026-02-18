@@ -1,41 +1,25 @@
 const userRepo = require('../../database/repositories/userRepo');
 const paymentRepo = require('../../database/repositories/paymentRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
+const productRepo = require('../../database/repositories/productRepo');
 const uiHelper = require('../../utils/uiHelper');
 const { isMasterAdmin } = require('../middlewares/auth');
+const config = require('../../config');
 
 module.exports = (bot) => {
-    bot.action('master_manage_admins', isMasterAdmin, async (ctx) => {
+    bot.action('master_panel', isMasterAdmin, async (ctx) => {
         try {
-            const admins = await userRepo.getAllAdmins();
-            const keyboard = admins
-                .filter(a => a.role !== 'master')
-                .map(a => ([{ 
-                    text: `❌ ${a.username || a.telegram_id} entlassen`, 
-                    callback_data: `master_fire_${a.telegram_id}` 
-                }]));
-
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
-
-            await uiHelper.updateOrSend(ctx, 'Admin-Verwaltung (Temporäre Admins):', { inline_keyboard: keyboard });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action(/^master_fire_(.+)$/, isMasterAdmin, async (ctx) => {
-        try {
-            const targetId = ctx.match[1];
-            await userRepo.removeAdmin(targetId);
-            await ctx.answerCbQuery('Admin wurde entlassen.');
-            
-            const admins = await userRepo.getAllAdmins();
-            const keyboard = admins
-                .filter(a => a.role !== 'master')
-                .map(a => ([{ text: `❌ ${a.username || a.telegram_id} entlassen`, callback_data: `master_fire_${a.telegram_id}` }]));
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
-
-            await uiHelper.updateOrSend(ctx, 'Admin wurde erfolgreich entfernt. Weitere Admins verwalten:', { inline_keyboard: keyboard });
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '⚖️ Freigabe-Queue', callback_data: 'master_pending_approvals' }],
+                    [{ text: '👥 Admin-Verwaltung', callback_data: 'master_manage_admins' }],
+                    [{ text: '📢 Rundnachricht (Broadcast)', callback_data: 'master_start_broadcast' }],
+                    [{ text: '💳 Zahlungsarten', callback_data: 'master_manage_payments' }],
+                    [{ text: '📊 Kundenstatistik', callback_data: 'master_customer_overview' }],
+                    [{ text: '🛒 Zum Shop (Test)', callback_data: 'shop_menu' }]
+                ]
+            };
+            await uiHelper.updateOrSend(ctx, '👑 *Master-Dashboard*\nVolle Systemkontrolle:', keyboard);
         } catch (error) {
             console.error(error.message);
         }
@@ -44,12 +28,79 @@ module.exports = (bot) => {
     bot.action('master_manage_payments', isMasterAdmin, async (ctx) => {
         try {
             const methods = await paymentRepo.getActivePaymentMethods();
-            const keyboard = methods.map(m => ([{ text: `✏️ ${m.name}`, callback_data: `master_edit_pay_${m.id}` }]));
-            
-            keyboard.push([{ text: '➕ Neue Zahlungsart', callback_data: 'master_add_payment' }]);
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
+            const keyboard = methods.map(m => ([{ 
+                text: `🗑 ${m.name}`, 
+                callback_data: `master_del_pay_${m.id}` 
+            }]));
 
-            await uiHelper.updateOrSend(ctx, 'Zahlungsoptionen verwalten:', { inline_keyboard: keyboard });
+            keyboard.push([{ text: '➕ Zahlungsart hinzufügen', callback_data: 'master_add_payment' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+
+            const text = '💳 *Zahlungsarten verwalten*\n\nHier kannst du neue Methoden anlegen oder bestehende durch Anklicken löschen:';
+            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('master_add_payment', isMasterAdmin, async (ctx) => {
+        try {
+            await ctx.scene.enter('addPaymentMethodScene');
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^master_del_pay_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            const payId = ctx.match[1];
+            await paymentRepo.deletePaymentMethod(payId);
+            await ctx.answerCbQuery('✅ Zahlungsart gelöscht');
+            
+            // Refresh View
+            const methods = await paymentRepo.getActivePaymentMethods();
+            const keyboard = methods.map(m => ([{ text: `🗑 ${m.name}`, callback_data: `master_del_pay_${m.id}` }]));
+            keyboard.push([{ text: '➕ Zahlungsart hinzufügen', callback_data: 'master_add_payment' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            
+            await uiHelper.updateOrSend(ctx, 'Zahlungsart wurde erfolgreich entfernt.', { inline_keyboard: keyboard });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('master_start_broadcast', isMasterAdmin, async (ctx) => {
+        try {
+            await ctx.scene.enter('broadcastScene');
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('master_cleanup_blocked', isMasterAdmin, async (ctx) => {
+        try {
+            const customers = await userRepo.getAllCustomers();
+            const keyboard = customers.slice(0, 15).map(c => ([{ 
+                text: `🗑 ${c.username || c.telegram_id} löschen`, 
+                callback_data: `master_del_user_${c.telegram_id}` 
+            }]));
+
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            await uiHelper.updateOrSend(ctx, '⚠️ *Datenpflege*\nKlicke auf einen User, um dessen Datensatz (z.B. nach Blockierung) endgültig zu löschen:', { inline_keyboard: keyboard });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^master_del_user_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            const targetId = ctx.match[1];
+            await userRepo.deleteUser(targetId);
+            await ctx.answerCbQuery('✅ User-Daten gelöscht.');
+            const customers = await userRepo.getAllCustomers();
+            const keyboard = customers.slice(0, 15).map(c => ([{ text: `🗑 ${c.username || c.telegram_id} löschen`, callback_data: `master_del_user_${c.telegram_id}` }]));
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            await uiHelper.updateOrSend(ctx, 'User gelöscht. Weitere Datensätze verwalten:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
@@ -59,35 +110,152 @@ module.exports = (bot) => {
         try {
             const pending = await approvalRepo.getPendingApprovals();
             if (pending.length === 0) {
-                return uiHelper.updateOrSend(ctx, 'Keine ausstehenden Freigaben vorhanden.', {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]]
+                return uiHelper.updateOrSend(ctx, '✅ Keine ausstehenden Freigaben.', {
+                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
                 });
             }
 
             const keyboard = pending.map(p => ([{ 
-                text: `${p.action_type}: ID ${p.target_id}`, 
+                text: `${p.action_type === 'DELETE' ? '🗑' : '💰'} ID:${p.target_id} von ${p.requested_by}`, 
                 callback_data: `master_view_appr_${p.id}` 
             }]));
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
 
-            await uiHelper.updateOrSend(ctx, 'Ausstehende sensible Änderungen:', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '📋 *Ausstehende Anfragen:*', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
     });
 
-    bot.action('master_customer_overview', isMasterAdmin, async (ctx) => {
+    bot.action(/^master_view_appr_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
-            const customers = await userRepo.getAllCustomers ? await userRepo.getAllCustomers() : [];
-            let text = `📊 Kundenübersicht:\nAnzahl: ${customers.length}\n\n`;
-            
-            customers.slice(0, 10).forEach(c => {
-                text += `• ${c.username || 'Unbekannt'} (ID: ${c.telegram_id})\n`;
-            });
+            const approvalId = ctx.match[1];
+            const request = await approvalRepo.getApprovalById(approvalId);
+            const product = await productRepo.getProductById(request.target_id);
 
-            await uiHelper.updateOrSend(ctx, text, {
-                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]]
+            let text = `⚖️ *Anfrage-Details*\n\n`;
+            text += `Typ: ${request.action_type}\n`;
+            text += `Produkt: ${product ? product.name : 'Unbekannt'}\n`;
+            if (request.new_value) text += `Neuer Wert: *${request.new_value}*\n`;
+            text += `Anfrage von: ${request.requested_by}\n`;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '✅ Annehmen', callback_data: `master_approve_${approvalId}` },
+                        { text: '❌ Ablehnen', callback_data: `master_reject_${approvalId}` }
+                    ],
+                    [{ text: '🔙 Zurück', callback_data: 'master_pending_approvals' }]
+                ]
+            };
+
+            await uiHelper.updateOrSend(ctx, text, keyboard);
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^master_approve_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            const approvalId = ctx.match[1];
+            const request = await approvalRepo.getApprovalById(approvalId);
+
+            if (request.action_type === 'PRICE_CHANGE') {
+                await productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value));
+            } else if (request.action_type === 'DELETE') {
+                await productRepo.deleteProduct(request.target_id);
+            }
+
+            await approvalRepo.updateApprovalStatus(approvalId, 'approved');
+            await ctx.answerCbQuery('✅ Anfrage genehmigt!');
+            
+            await uiHelper.updateOrSend(ctx, '✅ Die Änderung wurde erfolgreich im System übernommen.', {
+                inline_keyboard: [[{ text: '🔙 Zurück zur Queue', callback_data: 'master_pending_approvals' }]]
             });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^master_reject_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            await approvalRepo.updateApprovalStatus(ctx.match[1], 'rejected');
+            await ctx.answerCbQuery('❌ Abgelehnt.');
+            
+            const pending = await approvalRepo.getPendingApprovals();
+            const keyboard = pending.map(p => ([{ text: `${p.action_type}: ID ${p.target_id}`, callback_data: `master_view_appr_${p.id}` }]));
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            
+            await uiHelper.updateOrSend(ctx, 'Anfrage wurde abgelehnt und entfernt.', { inline_keyboard: keyboard });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('master_manage_admins', isMasterAdmin, async (ctx) => {
+        try {
+            const admins = await userRepo.getAllAdmins();
+            const keyboard = admins
+                .filter(a => Number(a.telegram_id) !== Number(config.MASTER_ADMIN_ID))
+                .map(a => ([{ 
+                    text: `❌ ${a.username || a.telegram_id} entlassen`, 
+                    callback_data: `master_fire_${a.telegram_id}` 
+                }]));
+
+            keyboard.push([{ text: '➕ Admin ernennen (ID)', callback_data: 'master_prompt_add_admin' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            
+            await uiHelper.updateOrSend(ctx, '👥 *Personalverwaltung*\nHier kannst du Admins verwalten oder neue hinzufügen:', { inline_keyboard: keyboard });
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action('master_prompt_add_admin', isMasterAdmin, async (ctx) => {
+        ctx.session.awaitingAdminId = true;
+        await uiHelper.updateOrSend(ctx, '🆔 *Admin ernennen*\n\nBitte sende mir jetzt die **Telegram ID** des Nutzers, den du zum Admin machen möchtest.\n(Oder tippe /cancel)', {
+            inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'master_manage_admins' }]]
+        });
+    });
+
+    bot.on('message', async (ctx, next) => {
+        if (!ctx.session || !ctx.session.awaitingAdminId || !ctx.message.text) return next();
+        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) return next();
+        
+        const targetId = ctx.message.text.trim();
+        if (!/^\d+$/.test(targetId)) {
+            return ctx.reply('⚠️ Das ist keine gültige ID. Bitte sende nur Zahlen.');
+        }
+
+        try {
+            await userRepo.updateUserRole(targetId, 'admin');
+            ctx.session.awaitingAdminId = false;
+            await ctx.reply(`✅ Nutzer ${targetId} wurde zum Admin ernannt!`);
+            const admins = await userRepo.getAllAdmins();
+            const keyboard = admins
+                .filter(a => Number(a.telegram_id) !== Number(config.MASTER_ADMIN_ID))
+                .map(a => ([{ text: `❌ ${a.username || a.telegram_id} entlassen`, callback_data: `master_fire_${a.telegram_id}` }]));
+            keyboard.push([{ text: '➕ Admin ernennen', callback_data: 'master_prompt_add_admin' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            await ctx.reply('Aktualisierte Admin-Liste:', { reply_markup: { inline_keyboard: keyboard } });
+        } catch (error) {
+            ctx.reply('❌ Fehler beim Ernennen des Admins.');
+        }
+    });
+
+    bot.action(/^master_fire_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            await userRepo.removeAdmin(ctx.match[1]);
+            await ctx.answerCbQuery('Admin entlassen.');
+            
+            const admins = await userRepo.getAllAdmins();
+            const keyboard = admins
+                .filter(a => Number(a.telegram_id) !== Number(config.MASTER_ADMIN_ID))
+                .map(a => ([{ text: `❌ ${a.username || a.telegram_id} entlassen`, callback_data: `master_fire_${a.telegram_id}` }]));
+            keyboard.push([{ text: '➕ Admin ernennen', callback_data: 'master_prompt_add_admin' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            
+            await uiHelper.updateOrSend(ctx, 'Admin erfolgreich entfernt.', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }

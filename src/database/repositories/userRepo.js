@@ -20,7 +20,7 @@ const upsertUser = async (userId, username) => {
 };
 
 const getUserRole = async (userId) => {
-    if (userId === config.MASTER_ADMIN_ID) return 'master';
+    if (Number(userId) === Number(config.MASTER_ADMIN_ID)) return 'master';
 
     const { data, error } = await supabase
         .from('users')
@@ -34,29 +34,36 @@ const getUserRole = async (userId) => {
 };
 
 const isMasterAdmin = async (userId) => {
-    return userId === config.MASTER_ADMIN_ID;
+    return Number(userId) === Number(config.MASTER_ADMIN_ID);
+};
+
+const updateUserRole = async (targetId, role) => {
+    const { data, error } = await supabase
+        .from('users')
+        .update({ role: role })
+        .eq('telegram_id', targetId)
+        .select();
+
+    if (error) throw error;
+    return data && data.length > 0;
 };
 
 const addAdmin = async (targetId) => {
-    const { data, error } = await supabase
-        .from('users')
-        .update({ role: 'admin' })
-        .eq('telegram_id', targetId)
-        .select();
-
-    if (error) throw error;
-    return data && data.length > 0;
+    return await updateUserRole(targetId, 'admin');
 };
 
 const removeAdmin = async (targetId) => {
-    const { data, error } = await supabase
+    return await updateUserRole(targetId, 'customer');
+};
+
+const deleteUser = async (telegramId) => {
+    const { error } = await supabase
         .from('users')
-        .update({ role: 'customer' })
-        .eq('telegram_id', targetId)
-        .select();
+        .delete()
+        .eq('telegram_id', telegramId);
 
     if (error) throw error;
-    return data && data.length > 0;
+    return true;
 };
 
 const getAllAdmins = async () => {
@@ -94,6 +101,8 @@ module.exports = {
     isMasterAdmin,
     addAdmin,
     removeAdmin,
+    updateUserRole,
+    deleteUser,
     getAllAdmins,
     getAllCustomers
 };

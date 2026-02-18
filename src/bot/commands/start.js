@@ -10,26 +10,21 @@ module.exports = (bot) => {
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
 
-            // User in DB anlegen oder aktualisieren
             await userRepo.upsertUser(userId, username);
 
             const role = await userRepo.getUserRole(userId);
+            const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
             let text = `Willkommen beim *Shop Bot*!\n\n`;
             let keyboard;
 
-            // Priorität 1: Hardcoded Master ID aus der Config
-            if (userId === config.MASTER_ADMIN_ID) {
-                text += `🔧 *Master Panel* (v${config.VERSION})`;
+            if (isMaster) {
+                text += `👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
                 keyboard = masterMenu();
-            } 
-            // Priorität 2: Rollen aus der Datenbank
-            else if (role === 'admin') {
-                text += `🛠 *Admin Bereich*`;
+            } else if (role === 'admin') {
+                text += `🛠 *Admin-Bereich*\n\nVerwalten Sie Produkte und Kategorien.`;
                 keyboard = adminMenu();
-            } 
-            // Standard: Kunde
-            else {
+            } else {
                 text += `Bitte wähle eine Option aus dem Menü:`;
                 keyboard = customerMenu();
             }

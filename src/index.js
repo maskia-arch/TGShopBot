@@ -15,6 +15,7 @@ const addCategoryScene = require('./bot/scenes/addCategoryScene');
 const renameCategoryScene = require('./bot/scenes/renameCategoryScene');
 const askQuantityScene = require('./bot/scenes/askQuantityScene');
 const editPriceScene = require('./bot/scenes/editPriceScene');
+const broadcastScene = require('./bot/scenes/broadcastScene');
 
 const notificationService = require('./services/notificationService');
 
@@ -42,7 +43,8 @@ const stage = new Scenes.Stage([
     addCategoryScene,
     renameCategoryScene,
     askQuantityScene,
-    editPriceScene
+    editPriceScene,
+    broadcastScene
 ]);
 
 bot.use(session());

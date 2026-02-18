@@ -7,16 +7,30 @@ const { isAdmin } = require('../middlewares/auth');
 module.exports = (bot) => {
     bot.action('shop_menu', async (ctx) => {
         try {
-            const categories = await productRepo.getActiveCategories();
-            const keyboard = categories.map(c => ([{ text: c.name, callback_data: `category_${c.id}` }]));
-            
-            keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
+            const allCategories = await productRepo.getActiveCategories();
+            const keyboard = [];
+
+            for (const cat of allCategories) {
+                const products = await productRepo.getProductsByCategory(cat.id);
+                const activeProducts = products.filter(p => p.is_active);
+                if (activeProducts.length > 0) {
+                    keyboard.push([{ text: cat.name, callback_data: `category_${cat.id}` }]);
+                }
+            }
+
+            const noneProducts = await productRepo.getProductsByCategory(null);
+            const activeNoneProducts = noneProducts.filter(p => p.is_active);
+            if (activeNoneProducts.length > 0) {
+                keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
+            }
 
             const userIsAdmin = await new Promise(resolve => {
                 isAdmin(ctx, () => resolve(true)).catch(() => resolve(false));
             });
 
-            if (userIsAdmin === true) {
+            const isTestMode = ctx.callbackQuery.data.includes('admin') || (ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
+
+            if (userIsAdmin === true && isTestMode) {
                 keyboard.push([{ text: '🛠 Zurück zum Admin-Panel', callback_data: 'admin_panel' }]);
             } else {
                 keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);

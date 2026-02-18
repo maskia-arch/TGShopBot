@@ -5,24 +5,22 @@ const updateOrSend = async (ctx, text, replyMarkup) => {
     };
 
     try {
-        // Falls ein Callback vorliegt, versuchen wir die Nachricht zu editieren
         if (ctx.callbackQuery && ctx.callbackQuery.message) {
-            // WICHTIG: Wenn die alte Nachricht ein Foto hatte, kann editMessageText fehlschlagen.
-            // In diesem Fall springt der catch-Block ein.
-            await ctx.editMessageText(text, options);
+            // Wenn die Nachricht ein Foto hat, können wir keinen Text editieren
+            if (ctx.callbackQuery.message.photo) {
+                await ctx.deleteMessage().catch(() => {});
+                return await ctx.reply(text, options);
+            }
+            return await ctx.editMessageText(text, options);
         } else {
-            const msg = await ctx.reply(text, options);
-            return msg;
+            return await ctx.reply(text, options);
         }
     } catch (error) {
-        // Fallback: Wenn Editieren nicht möglich ist (z.B. wegen Bildwechsel), 
-        // löschen wir die alte Nachricht und senden eine neue.
         try {
             if (ctx.callbackQuery && ctx.callbackQuery.message) {
                 await ctx.deleteMessage().catch(() => {});
             }
-            const msg = await ctx.reply(text, options);
-            return msg;
+            return await ctx.reply(text, options);
         } catch (fallbackError) {
             console.error('UI Helper Error:', fallbackError.message);
         }
@@ -30,12 +28,19 @@ const updateOrSend = async (ctx, text, replyMarkup) => {
 };
 
 /**
- * Sendet eine Nachricht, die sich nach einer bestimmten Zeit selbst löscht.
- * Ideal für "Erfolgreich hinzugefügt" oder Fehlermeldungen.
+ * Sendet eine Nachricht, die nach X Sekunden verschwindet.
+ * Löscht zusätzlich die auslösende Nutzer-Nachricht (falls vorhanden),
+ * um den Chatverlauf sauber zu halten.
  */
-const sendTemporary = async (ctx, text, seconds = 4) => {
+const sendTemporary = async (ctx, text, seconds = 3) => {
     try {
-        const msg = await ctx.reply(`⏳ ${text}`);
+        // Die auslösende Nachricht des Users löschen (z.B. die getippte Menge)
+        if (ctx.message) {
+            ctx.deleteMessage().catch(() => {});
+        }
+
+        const msg = await ctx.reply(`✨ ${text}`);
+        
         setTimeout(() => {
             ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {});
         }, seconds * 1000);

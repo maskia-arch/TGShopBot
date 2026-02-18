@@ -29,11 +29,19 @@ const renameCategory = async (id, newName) => {
 };
 
 const deleteCategory = async (id) => {
-    const { error } = await supabase
+    const { error: updateError } = await supabase
+        .from('products')
+        .update({ category_id: null })
+        .eq('category_id', id);
+    
+    if (updateError) throw updateError;
+
+    const { error: deleteError } = await supabase
         .from('categories')
         .delete()
         .eq('id', id);
-    if (error) throw error;
+        
+    if (deleteError) throw deleteError;
     return true;
 };
 
@@ -98,7 +106,8 @@ const addProduct = async (productData) => {
             image_url: imageUrl,
             is_active: true,
             is_out_of_stock: false
-        }]);
+        }])
+        .select();
     if (error) throw error;
     return data;
 };

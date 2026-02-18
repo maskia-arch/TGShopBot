@@ -2,38 +2,39 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.1.3
+Version: 0.1.6
 
 --- 1. ENVIRONMENT VARIABLES (Render.com) ---
 Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
 
 TELEGRAM_BOT_TOKEN = (Dein Bot Token vom @BotFather)
 SUPABASE_URL       = (Deine Supabase Projekt URL)
-SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Nicht den Anon Key!)
-MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Volle Kontrolle)
-PORT               = 10000 (Standard für Render Web Services)
+SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Service Role nutzen!)
+MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Absolute Systemgewalt)
+VERSION            = 0.1.6
+PORT               = 10000
 
 --- 2. SUPABASE SQL SETUP ---
-Kopiere die folgenden Befehle nacheinander in den SQL Editor deiner Supabase Instanz:
+Führe diese Befehle im Supabase SQL Editor aus. 
+Hinweis: Falls Tabellen aus v0.1.3 existieren, werden nur die neuen Spalten/Tabellen ergänzt.
 
--- Tabelle: Users (Kunden und Admins)
-CREATE TABLE users (
+-- Tabelle: Users (Erweitert für v0.1.6)
+CREATE TABLE IF NOT EXISTS users (
     telegram_id BIGINT PRIMARY KEY,
     username TEXT,
-    role TEXT DEFAULT 'customer', -- 'admin', 'customer'
+    role TEXT DEFAULT 'customer', -- 'master', 'admin', 'customer'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Tabelle: Kategorien
-CREATE TABLE categories (
+CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Tabelle: Produkte
--- Erlaubt NULL für category_id (Kategorielose Produkte / Sonstiges)
-CREATE TABLE products (
+-- Tabelle: Produkte (Optimiert für v0.1.6 Lagerlogik)
+CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL, 
     name TEXT NOT NULL,
@@ -41,41 +42,52 @@ CREATE TABLE products (
     price DECIMAL(10,2) NOT NULL,
     is_unit_price BOOLEAN DEFAULT FALSE,
     is_out_of_stock BOOLEAN DEFAULT FALSE,
-    image_url TEXT, -- Dezentrale Links (z.B. telegra.ph)
+    image_url TEXT,
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Tabelle: Zahlungsarten
-CREATE TABLE payment_methods (
+-- Tabelle: Zahlungsarten (v0.1.6 Update mit Adress-Support)
+CREATE TABLE IF NOT EXISTS payment_methods (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    description TEXT,
-    wallet_address TEXT,
+    wallet_address TEXT, -- Crypto Wallets, PayPal Email, etc.
     is_active BOOLEAN DEFAULT TRUE
 );
 
 -- Tabelle: Warenkorb
-CREATE TABLE carts (
+CREATE TABLE IF NOT EXISTS carts (
     id SERIAL PRIMARY KEY,
     user_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
     product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
     quantity INTEGER DEFAULT 1
 );
 
--- Tabelle: Ausstehende Freigaben (Approval-System für Master Admin)
-CREATE TABLE pending_approvals (
+-- Tabelle: Ausstehende Freigaben (Master Approval Workflow)
+CREATE TABLE IF NOT EXISTS pending_approvals (
     id SERIAL PRIMARY KEY,
     action_type TEXT NOT NULL, -- 'DELETE', 'PRICE_CHANGE'
     requested_by BIGINT REFERENCES users(telegram_id),
-    target_id INTEGER, -- ID des betroffenen Produkts
-    new_value TEXT,    -- Z.B. der neue Preis
+    target_id INTEGER, 
+    new_value TEXT,    
     status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- INDEXE für schnellere Abfragen (Empfohlen für v0.1.3)
-CREATE INDEX idx_products_category ON products(category_id);
-CREATE INDEX idx_products_active ON products(is_active);
-CREATE INDEX idx_approvals_status ON pending_approvals(status);
+-- NEU Tabelle: Sessions (Optional, falls persistente Sessions gewünscht sind)
+-- Falls Telegraf-Session-Memory genutzt wird, ist dies nur zur Info.
+CREATE TABLE IF NOT EXISTS bot_sessions (
+    id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+    session_data JSONB DEFAULT '{}'
+);
+
+--- 3. PERFORMANCE & CLEANUP INDEXE ---
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON pending_approvals(status);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+--- 4. INITIALISIERUNG ---
+-- Optional: Falls du direkt eine Zahlungsart einfügen willst:
+-- INSERT INTO payment_methods (name, wallet_address) VALUES ('Bitcoin', 'DEINE_BTC_ADRESSE');
 
 =========================================

@@ -4,7 +4,8 @@ const getActivePaymentMethods = async () => {
     const { data, error } = await supabase
         .from('payment_methods')
         .select('*')
-        .eq('is_active', true);
+        .eq('is_active', true)
+        .order('name', { ascending: true });
 
     if (error) throw error;
     return data;
@@ -21,23 +22,33 @@ const getPaymentMethod = async (id) => {
     return data;
 };
 
-const addPaymentMethod = async (paymentData) => {
-    const { name, description, walletAddress } = paymentData;
+const addPaymentMethod = async (name, address = null) => {
     const { data, error } = await supabase
         .from('payment_methods')
         .insert([{
             name: name,
-            description: description,
-            wallet_address: walletAddress,
+            wallet_address: address,
             is_active: true
-        }]);
+        }])
+        .select();
 
     if (error) throw error;
-    return data;
+    return data[0];
+};
+
+const deletePaymentMethod = async (id) => {
+    const { error } = await supabase
+        .from('payment_methods')
+        .delete()
+        .eq('id', id);
+
+    if (error) throw error;
+    return true;
 };
 
 module.exports = {
     getActivePaymentMethods,
     getPaymentMethod,
-    addPaymentMethod
+    addPaymentMethod,
+    deletePaymentMethod
 };
