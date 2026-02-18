@@ -9,6 +9,7 @@ const shopActions = require('./bot/actions/shopActions');
 const checkoutActions = require('./bot/actions/checkoutActions');
 const adminActions = require('./bot/actions/adminActions');
 const masterActions = require('./bot/actions/masterActions');
+const cartActions = require('./bot/actions/cartActions');
 
 const addProductScene = require('./bot/scenes/addProductScene');
 const addCategoryScene = require('./bot/scenes/addCategoryScene');
@@ -56,6 +57,7 @@ startCommand(bot);
 addadminCommand(bot);
 
 shopActions(bot);
+cartActions(bot);
 checkoutActions(bot);
 adminActions(bot);
 masterActions(bot);

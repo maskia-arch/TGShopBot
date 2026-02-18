@@ -28,7 +28,6 @@ module.exports = (bot) => {
                 isAdmin(ctx, () => resolve(true)).catch(() => resolve(false));
             });
 
-            // Prüfen, ob wir aus dem Admin-Bereich kommen
             const isTestMode = ctx.callbackQuery.data.includes('admin') || 
                                (ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
 
@@ -39,7 +38,6 @@ module.exports = (bot) => {
             }
 
             const text = '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:';
-            // ImageUrl ist hier null, da das Hauptmenü kein Bild braucht
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
 
         } catch (error) {
@@ -87,8 +85,6 @@ module.exports = (bot) => {
             const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
             keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
-            // WICHTIG: Wir nutzen jetzt uiHelper für ALLES. 
-            // Wenn product.image_url existiert, wird der Link unsichtbar eingebettet.
             await uiHelper.updateOrSend(ctx, caption, { inline_keyboard: keyboard }, product.image_url);
 
         } catch (error) {
@@ -109,7 +105,8 @@ module.exports = (bot) => {
                 return ctx.scene.enter('askQuantityScene', { productId });
             }
 
-            await cartRepo.addToCart(ctx.from.id, productId, 1);
+            const username = ctx.from.username || ctx.from.first_name || 'Kunde';
+            await cartRepo.addToCart(ctx.from.id, productId, 1, username);
             
             await uiHelper.sendTemporary(ctx, `✅ ${product.name} im Warenkorb!`, 3);
             await ctx.answerCbQuery('Hinzugefügt!');

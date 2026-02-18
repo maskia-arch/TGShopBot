@@ -4,6 +4,7 @@ const getCart = async (userId) => {
     const { data, error } = await supabase
         .from('carts')
         .select(`
+            id,
             quantity,
             products ( id, name, price, is_unit_price )
         `)
@@ -13,7 +14,16 @@ const getCart = async (userId) => {
     return data;
 };
 
-const addToCart = async (userId, productId, quantity) => {
+const addToCart = async (userId, productId, quantity, username = 'Kunde') => {
+    const { error: userError } = await supabase
+        .from('users')
+        .upsert(
+            { telegram_id: userId, username: username }, 
+            { onConflict: 'telegram_id', ignoreDuplicates: true }
+        );
+    
+    if (userError) throw userError;
+
     const { data: existing, error: fetchError } = await supabase
         .from('carts')
         .select('*')
@@ -50,11 +60,22 @@ const getCartTotal = async (userId) => {
 const getCartDetails = async (userId) => {
     const cart = await getCart(userId);
     return cart.map(item => ({
+        id: item.id,
+        productId: item.products.id,
         name: item.products.name,
         quantity: item.quantity,
         price: item.products.price,
         total: (item.quantity * item.products.price).toFixed(2)
     }));
+};
+
+const removeFromCart = async (cartId) => {
+    const { error } = await supabase
+        .from('carts')
+        .delete()
+        .eq('id', cartId);
+
+    if (error) throw error;
 };
 
 const clearCart = async (userId) => {
@@ -71,5 +92,6 @@ module.exports = {
     addToCart,
     getCartTotal,
     getCartDetails,
+    removeFromCart,
     clearCart
 };
