@@ -1,5 +1,5 @@
 const { Telegraf, Scenes, session } = require('telegraf');
-const http = require('http'); // Neu hinzugefügt
+const http = require('http');
 const config = require('./config');
 
 const startCommand = require('./bot/commands/start');
@@ -11,13 +11,13 @@ const adminActions = require('./bot/actions/adminActions');
 const masterActions = require('./bot/actions/masterActions');
 
 const addProductScene = require('./bot/scenes/addProductScene');
+const addCategoryScene = require('./bot/scenes/addCategoryScene');
+const renameCategoryScene = require('./bot/scenes/renameCategoryScene');
 const askQuantityScene = require('./bot/scenes/askQuantityScene');
 const editPriceScene = require('./bot/scenes/editPriceScene');
 
 const notificationService = require('./services/notificationService');
 
-// --- RENDER PORT BINDING (NEU) ---
-// Dies verhindert, dass Render den Bot wegen fehlendem Port neu startet
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shop Bot is alive!');
@@ -27,7 +27,6 @@ const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
     console.log(`Health-check server listening on port ${PORT}`);
 });
-// ---------------------------------
 
 if (!config.TELEGRAM_BOT_TOKEN) {
     console.error('TELEGRAM_BOT_TOKEN is missing');
@@ -39,8 +38,10 @@ const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 notificationService.init(bot);
 
 const stage = new Scenes.Stage([
-    addProductScene, 
-    askQuantityScene, 
+    addProductScene,
+    addCategoryScene,
+    renameCategoryScene,
+    askQuantityScene,
     editPriceScene
 ]);
 

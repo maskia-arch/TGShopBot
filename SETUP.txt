@@ -2,24 +2,25 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.1
+Version: 0.1.2
 
 --- 1. ENVIRONMENT VARIABLES (Render.com) ---
 Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
 
 TELEGRAM_BOT_TOKEN = (Dein Bot Token vom @BotFather)
 SUPABASE_URL       = (Deine Supabase Projekt URL)
-SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Nicht den Service Role Key mit dem Anon Key verwechseln!)
-MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Diese ID hat absolute Gewalt über den Bot)
+SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Nicht den Anon Key!)
+MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Volle Kontrolle)
+PORT               = 10000 (Standard für Render Web Services)
 
 --- 2. SUPABASE SQL SETUP ---
 Kopiere die folgenden Befehle nacheinander in den SQL Editor deiner Supabase Instanz:
 
--- Tabelle: Users (Verwaltet Kunden und angestellte Admins)
+-- Tabelle: Users
 CREATE TABLE users (
     telegram_id BIGINT PRIMARY KEY,
     username TEXT,
-    role TEXT DEFAULT 'customer', -- 'admin', 'customer'
+    role TEXT DEFAULT 'customer', -- 'master', 'admin', 'customer'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -30,16 +31,17 @@ CREATE TABLE categories (
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Tabelle: Produkte (Inklusive Lager- und Sichtbarkeitsstatus)
+-- Tabelle: Produkte
+-- HINWEIS: category_id ist optional (NULL), um kategorielose Produkte zu erlauben.
 CREATE TABLE products (
     id SERIAL PRIMARY KEY,
-    category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL, 
     name TEXT NOT NULL,
     description TEXT,
     price DECIMAL(10,2) NOT NULL,
     is_unit_price BOOLEAN DEFAULT FALSE,
     is_out_of_stock BOOLEAN DEFAULT FALSE,
-    image_url TEXT, -- Speichert dezentrale Links (z.B. telegra.ph)
+    image_url TEXT, -- Dezentrale Links (telegra.ph)
     is_active BOOLEAN DEFAULT TRUE
 );
 
@@ -60,15 +62,18 @@ CREATE TABLE carts (
     quantity INTEGER DEFAULT 1
 );
 
--- Tabelle: Ausstehende Freigaben (Approval-System für den Master Admin)
+-- Tabelle: Ausstehende Freigaben
 CREATE TABLE pending_approvals (
     id SERIAL PRIMARY KEY,
     action_type TEXT NOT NULL, -- 'DELETE', 'PRICE_CHANGE'
     requested_by BIGINT REFERENCES users(telegram_id),
     target_id INTEGER,
     new_value TEXT,
-    status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    status TEXT DEFAULT 'pending', 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- OPTIONAL: Falls Tabelle bereits existiert, Kategorie-Zwang entfernen:
+-- ALTER TABLE products ALTER COLUMN category_id DROP NOT NULL;
 
 =========================================

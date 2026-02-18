@@ -70,7 +70,7 @@ const addProductScene = new Scenes.WizardScene(
         
         try {
             await productRepo.addProduct(ctx.wizard.state.productData);
-            await ctx.reply('✅ Produkt erfolgreich mit dezentralem Bild-Hosting angelegt!', {
+            await ctx.reply('✅ Produkt erfolgreich angelegt!', {
                 reply_markup: { remove_keyboard: true }
             });
         } catch (error) {

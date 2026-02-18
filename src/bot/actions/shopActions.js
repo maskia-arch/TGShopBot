@@ -8,13 +8,18 @@ module.exports = (bot) => {
         try {
             const categories = await productRepo.getActiveCategories();
             const keyboard = categories.map(c => ([{ text: c.name, callback_data: `category_${c.id}` }]));
+            
+            // Button für Produkte ohne Kategorie hinzufügen
+            keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
             keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);
+
+            const text = 'Bitte wähle eine Kategorie:';
 
             if (ctx.callbackQuery.message.photo) {
                 await ctx.deleteMessage().catch(() => {});
-                await ctx.reply('Bitte wähle eine Kategorie:', { reply_markup: { inline_keyboard: keyboard } });
+                await ctx.reply(text, { reply_markup: { inline_keyboard: keyboard } });
             } else {
-                await uiHelper.updateOrSend(ctx, 'Bitte wähle eine Kategorie:', { inline_keyboard: keyboard });
+                await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
             }
         } catch (error) {
             console.error(error.message);
@@ -23,7 +28,7 @@ module.exports = (bot) => {
 
     bot.action(/^category_(.+)$/, async (ctx) => {
         try {
-            const categoryId = ctx.match[1];
+            const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
             const allProducts = await productRepo.getProductsByCategory(categoryId);
             const visibleProducts = allProducts.filter(p => p.is_active);
 
@@ -34,7 +39,7 @@ module.exports = (bot) => {
             
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
 
-            const text = 'Verfügbare Produkte:';
+            const text = categoryId === null ? 'Sonstige Produkte:' : 'Verfügbare Produkte:';
 
             if (ctx.callbackQuery.message.photo) {
                 await ctx.deleteMessage().catch(() => {});
@@ -64,7 +69,10 @@ module.exports = (bot) => {
             } else {
                 keyboard.push([{ text: '🛒 In den Warenkorb', callback_data: `add_to_cart_${product.id}` }]);
             }
-            keyboard.push([{ text: '🔙 Zurück', callback_data: `category_${product.category_id}` }]);
+            
+            // Dynamischer Zurück-Button (entweder zur Kategorie oder zu "none")
+            const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
+            keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
             if (product.image_url) {
                 await ctx.deleteMessage().catch(() => {});
@@ -103,8 +111,9 @@ module.exports = (bot) => {
 
             await cartRepo.addToCart(ctx.from.id, productId, 1);
             
+            const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
             const keyboard = [
-                [{ text: '🛍️ Weiter einkaufen', callback_data: `category_${product.category_id}` }],
+                [{ text: '🛍️ Weiter einkaufen', callback_data: backTarget }],
                 [{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]
             ];
             
