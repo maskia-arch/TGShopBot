@@ -53,6 +53,11 @@ const stage = new Scenes.Stage([
 bot.use(session());
 bot.use(stage.middleware());
 
+// Globaler Fehler-Catcher, damit der Bot nicht mehr einfriert
+bot.catch((err, ctx) => {
+    console.error(`Update-Fehler bei ${ctx.updateType}:`, err.message);
+});
+
 startCommand(bot);
 addadminCommand(bot);
 
@@ -62,11 +67,18 @@ checkoutActions(bot);
 adminActions(bot);
 masterActions(bot);
 
-bot.launch().then(() => {
-    console.log(`Bot v${config.VERSION} started`);
-}).catch((error) => {
-    console.error(error.message);
-});
+// Auto-Reconnect Logik
+const startBot = () => {
+    bot.launch().then(() => {
+        console.log(`Bot v${config.VERSION} started`);
+    }).catch((error) => {
+        console.error('Telegram Connection Error:', error.message);
+        console.log('Versuche Neustart in 5 Sekunden...');
+        setTimeout(startBot, 5000);
+    });
+};
+
+startBot();
 
 process.once('SIGINT', () => {
     bot.stop('SIGINT');
@@ -75,4 +87,11 @@ process.once('SIGINT', () => {
 process.once('SIGTERM', () => {
     bot.stop('SIGTERM');
     server.close();
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled Rejection:', reason);
 });
