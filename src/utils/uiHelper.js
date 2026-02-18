@@ -1,39 +1,59 @@
 const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
-    // Wenn eine Image-URL vorhanden ist, betten wir sie als unsichtbaren Link am Anfang ein
-    // Telegram generiert daraus automatisch eine Link-Vorschau (Web Page Preview)
-    let formattedText = text;
-    if (imageUrl) {
-        // Nutzt ein unsichtbares Zeichen (U+200B), um den Link zu maskieren
-        formattedText = `[\u200B](${imageUrl})${text}`;
-    }
-
     const options = {
         parse_mode: 'Markdown',
-        disable_web_page_preview: false, // WICHTIG: Muss false sein für Bild-Vorschau
         ...(replyMarkup && { reply_markup: replyMarkup })
     };
 
     try {
         if (ctx.callbackQuery && ctx.callbackQuery.message) {
-            // Falls die alte Nachricht ein "echtes" Foto-Objekt war (kein Link-Preview),
-            // müssen wir löschen und neu senden, da Telegram Edit-Typen nicht mischen kann.
-            if (ctx.callbackQuery.message.photo) {
-                await ctx.deleteMessage().catch(() => {});
-                return await ctx.reply(formattedText, options);
+            // Prüfen, ob die aktuelle Nachricht ein Foto ist
+            const isCurrentlyPhoto = ctx.callbackQuery.message.photo !== undefined;
+
+            if (imageUrl) {
+                // ZIEL: Wir wollen ein BILD anzeigen
+                if (isCurrentlyPhoto) {
+                    // Es ist bereits eine Foto-Nachricht -> Wir editieren nur das Bild und den Text (Caption)
+                    return await ctx.editMessageMedia({
+                        type: 'photo',
+                        media: imageUrl,
+                        caption: text,
+                        parse_mode: 'Markdown'
+                    }, { reply_markup: replyMarkup });
+                } else {
+                    // Es ist aktuell nur Text -> Löschen und als neue Foto-Nachricht senden
+                    await ctx.deleteMessage().catch(() => {});
+                    return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
+                }
+            } else {
+                // ZIEL: Wir wollen NUR TEXT anzeigen
+                if (isCurrentlyPhoto) {
+                    // Es ist aktuell ein Foto -> Löschen und als reinen Text neu senden
+                    await ctx.deleteMessage().catch(() => {});
+                    return await ctx.reply(text, options);
+                } else {
+                    // Es ist bereits Text -> Wir editieren einfach den Text
+                    return await ctx.editMessageText(text, options);
+                }
             }
-            
-            // Textnachricht (mit oder ohne Link-Preview) editieren
-            return await ctx.editMessageText(formattedText, options);
         } else {
-            return await ctx.reply(formattedText, options);
+            // Keine CallbackQuery (z.B. direkter Aufruf)
+            if (imageUrl) {
+                return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
+            } else {
+                return await ctx.reply(text, options);
+            }
         }
     } catch (error) {
+        // Fallback: Wenn das Editieren fehlschlägt (z.B. weil sich der Text nicht geändert hat),
+        // löschen wir die Nachricht und senden sie komplett neu.
         try {
-            // Fallback bei Fehlern (z.B. Nachricht wurde gelöscht oder identischer Inhalt)
             if (ctx.callbackQuery && ctx.callbackQuery.message) {
                 await ctx.deleteMessage().catch(() => {});
             }
-            return await ctx.reply(formattedText, options);
+            if (imageUrl) {
+                return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
+            }
+            return await ctx.reply(text, options);
         } catch (fallbackError) {
             console.error('UI Helper Error:', fallbackError.message);
         }
@@ -45,6 +65,7 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
  */
 const sendTemporary = async (ctx, text, seconds = 3) => {
     try {
+        // Die auslösende User-Nachricht löschen (falls vorhanden)
         if (ctx.message) {
             ctx.deleteMessage().catch(() => {});
         }
