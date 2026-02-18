@@ -279,4 +279,28 @@ module.exports = (bot) => {
             console.error(error.message);
         }
     });
+
+    bot.action('master_ack_msg', isMasterAdmin, async (ctx) => {
+        try {
+            const msgText = ctx.callbackQuery.message.text || 'Information zur Kenntnis genommen.';
+            await ctx.editMessageText(`✅ *Gelesen*\n~${msgText}~`, { parse_mode: 'Markdown' });
+            await ctx.answerCbQuery('Bestätigt.');
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^master_undo_prod_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            const prodId = ctx.match[1];
+            await productRepo.deleteProduct(prodId);
+            await ctx.answerCbQuery('Rückgängig gemacht!');
+            
+            const msgText = ctx.callbackQuery.message.text || 'Produkterstellung';
+            await ctx.editMessageText(`↩️ *Rückgängig gemacht*\n~${msgText}~`, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error(error.message);
+            await ctx.answerCbQuery('Fehler beim Löschen.', { show_alert: true });
+        }
+    });
 };

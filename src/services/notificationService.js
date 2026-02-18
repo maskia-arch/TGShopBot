@@ -141,9 +141,33 @@ const notifyMasterApproval = async ({ approvalId, actionType, productId, product
     }
 };
 
+const notifyMasterNewProduct = async ({ adminName, productName, categoryName, time, productId }) => {
+    try {
+        const masterId = config.MASTER_ADMIN_ID;
+        if (!masterId) return;
+
+        const text = `ℹ️ *Neues Produkt angelegt*\n\nAdmin ${adminName} hat das Produkt *${productName}* in *${categoryName}* um ${time} Uhr erstellt.`;
+
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '✅ Zur Kenntnis genommen', callback_data: 'master_ack_msg' }],
+                [{ text: '↩️ Rückgängig machen', callback_data: `master_undo_prod_${productId}` }]
+            ]
+        };
+
+        await bot.telegram.sendMessage(masterId, text, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        }).catch(() => {});
+    } catch (error) {
+        console.error(error.message);
+    }
+};
+
 module.exports = {
     init,
     sendBroadcast,
     notifyAdminsNewOrder,
-    notifyMasterApproval
+    notifyMasterApproval,
+    notifyMasterNewProduct
 };

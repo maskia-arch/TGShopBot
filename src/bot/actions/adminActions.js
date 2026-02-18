@@ -117,7 +117,7 @@ module.exports = (bot) => {
             }]));
             
             keyboard.push([{ text: '📦 Kategorielose Produkte', callback_data: 'admin_prod_cat_none' }]);
-            keyboard.push([{ text: '➕ Neues Produkt (Allgemein)', callback_data: 'admin_add_prod_to_none' }]);
+            keyboard.push([{ text: '➕ Neues Produkt (Kategorielos)', callback_data: 'admin_add_prod_to_none' }]);
             keyboard.push([{ text: '🔙 Zurück zum Admin-Menü', callback_data: 'admin_panel' }]);
 
             await uiHelper.updateOrSend(ctx, 'Wähle eine Kategorie:', { inline_keyboard: keyboard });

@@ -2,6 +2,8 @@ const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
 const { uploadToDezentral } = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
+const notificationService = require('../../services/notificationService');
+const config = require('../../config');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -88,15 +90,38 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
                 finalImageUrl = await uploadToDezentral(fileLink.href);
             } catch (error) {
-                console.error('Bild-Upload Fehler:', error.message);
+                console.error(error.message);
             }
         }
 
         ctx.wizard.state.productData.imageUrl = finalImageUrl;
         
         try {
-            await productRepo.addProduct(ctx.wizard.state.productData);
-            await cleanup(ctx); // Alle Fragen und Antworten löschen
+            const newProduct = await productRepo.addProduct(ctx.wizard.state.productData);
+            await cleanup(ctx); 
+            
+            const createdId = newProduct ? (newProduct.id || (newProduct[0] && newProduct[0].id)) : null;
+            
+            let catName = 'Kategorielos';
+            if (ctx.wizard.state.productData.categoryId) {
+                const categories = await productRepo.getActiveCategories();
+                const cat = categories.find(c => c.id == ctx.wizard.state.productData.categoryId);
+                if (cat) catName = cat.name;
+            }
+
+            const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+            const time = new Date().toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+
+            if (createdId && Number(ctx.from.id) !== Number(config.MASTER_ADMIN_ID) && notificationService.notifyMasterNewProduct) {
+                await notificationService.notifyMasterNewProduct({
+                    adminName,
+                    productName: ctx.wizard.state.productData.name,
+                    categoryName: catName,
+                    time,
+                    productId: createdId
+                });
+            }
+            
             await uiHelper.sendTemporary(ctx, `Produkt "${ctx.wizard.state.productData.name}" erstellt!`, 3);
         } catch (error) {
             console.error(error.message);
