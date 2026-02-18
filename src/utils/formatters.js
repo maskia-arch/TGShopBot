@@ -1,0 +1,40 @@
+const formatPrice = (amount) => {
+    const num = parseFloat(amount);
+    if (isNaN(num)) return '0,00 €';
+    return num.toFixed(2).replace('.', ',') + ' €';
+};
+
+const formatInvoice = (items, total, paymentMethod) => {
+    let text = '📦 *Bestellübersicht*\n\n';
+    
+    items.forEach(item => {
+        text += `▪️ ${item.quantity}x ${item.name} (${formatPrice(item.price)}) = ${formatPrice(item.total)}\n`;
+    });
+    
+    text += `\n━━━━━━━━━━━━━━━\n`;
+    text += `💰 *Gesamtsumme: ${formatPrice(total)}*\n`;
+    text += `💳 *Zahlung:* ${paymentMethod.name}\n`;
+    
+    if (paymentMethod.description) {
+        text += `\n📝 *Hinweis:* _${paymentMethod.description}_\n`;
+    }
+    
+    return text;
+};
+
+const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+};
+
+module.exports = {
+    formatPrice,
+    formatInvoice,
+    formatDate
+};

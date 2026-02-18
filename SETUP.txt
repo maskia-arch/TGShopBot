@@ -1,0 +1,74 @@
+=========================================
+      t.me/autoacts - Shop Bot Setup
+=========================================
+Autor: t.me/autoacts
+Version: 0.1
+
+--- 1. ENVIRONMENT VARIABLES (Render.com) ---
+Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
+
+TELEGRAM_BOT_TOKEN = (Dein Bot Token vom @BotFather)
+SUPABASE_URL       = (Deine Supabase Projekt URL)
+SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Nicht den Service Role Key mit dem Anon Key verwechseln!)
+MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Diese ID hat absolute Gewalt über den Bot)
+
+--- 2. SUPABASE SQL SETUP ---
+Kopiere die folgenden Befehle nacheinander in den SQL Editor deiner Supabase Instanz:
+
+-- Tabelle: Users (Verwaltet Kunden und angestellte Admins)
+CREATE TABLE users (
+    telegram_id BIGINT PRIMARY KEY,
+    username TEXT,
+    role TEXT DEFAULT 'customer', -- 'admin', 'customer'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Tabelle: Kategorien
+CREATE TABLE categories (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Tabelle: Produkte (Inklusive Lager- und Sichtbarkeitsstatus)
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    price DECIMAL(10,2) NOT NULL,
+    is_unit_price BOOLEAN DEFAULT FALSE,
+    is_out_of_stock BOOLEAN DEFAULT FALSE,
+    image_url TEXT, -- Speichert dezentrale Links (z.B. telegra.ph)
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Tabelle: Zahlungsarten
+CREATE TABLE payment_methods (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    wallet_address TEXT,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Tabelle: Warenkorb
+CREATE TABLE carts (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
+    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+    quantity INTEGER DEFAULT 1
+);
+
+-- Tabelle: Ausstehende Freigaben (Approval-System für den Master Admin)
+CREATE TABLE pending_approvals (
+    id SERIAL PRIMARY KEY,
+    action_type TEXT NOT NULL, -- 'DELETE', 'PRICE_CHANGE'
+    requested_by BIGINT REFERENCES users(telegram_id),
+    target_id INTEGER,
+    new_value TEXT,
+    status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+=========================================
