@@ -158,6 +158,7 @@ module.exports = (bot) => {
                 inline_keyboard: [
                     [{ text: stockLabel, callback_data: `admin_toggle_stock_${p.id}` }],
                     [{ text: visLabel, callback_data: `admin_toggle_vis_${p.id}` }],
+                    [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${p.id}` }],
                     [{ text: '📁 Kategorie verschieben', callback_data: `admin_move_prod_${p.id}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${p.id}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${p.id}` }],
@@ -165,7 +166,17 @@ module.exports = (bot) => {
                 ]
             };
             
-            await uiHelper.updateOrSend(ctx, `EINSTELLUNGEN: *${p.name}*`, keyboard);
+            // Wichtig: Hier wird die image_url an den uiHelper übergeben, damit Admins das Bild sehen
+            await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${p.name}*`, keyboard, p.image_url);
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^admin_edit_img_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            // Startet die neue Scene zum Ändern des Bildes
+            await ctx.scene.enter('editProductImageScene', { productId: ctx.match[1] });
         } catch (error) {
             console.error(error.message);
         }
@@ -215,13 +226,15 @@ module.exports = (bot) => {
                 inline_keyboard: [
                     [{ text: stockLabel, callback_data: `admin_toggle_stock_${updatedP.id}` }],
                     [{ text: visLabel, callback_data: `admin_toggle_vis_${updatedP.id}` }],
+                    [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${updatedP.id}` }],
                     [{ text: '📁 Kategorie verschieben', callback_data: `admin_move_prod_${updatedP.id}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${updatedP.id}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${updatedP.id}` }],
                     [{ text: '🔙 Zurück zur Liste', callback_data: updatedP.category_id ? `admin_prod_cat_${updatedP.category_id}` : 'admin_prod_cat_none' }]
                 ]
             };
-            await uiHelper.updateOrSend(ctx, `EINSTELLUNGEN: *${updatedP.name}*`, keyboard);
+            // Auch hier beim Update das Bild mitsenden
+            await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${updatedP.name}*`, keyboard, updatedP.image_url);
         } catch (error) {
             console.error(error.message);
         }

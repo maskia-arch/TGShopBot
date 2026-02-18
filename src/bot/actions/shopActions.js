@@ -28,7 +28,9 @@ module.exports = (bot) => {
                 isAdmin(ctx, () => resolve(true)).catch(() => resolve(false));
             });
 
-            const isTestMode = ctx.callbackQuery.data.includes('admin') || (ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
+            // Prüfen, ob wir aus dem Admin-Bereich kommen
+            const isTestMode = ctx.callbackQuery.data.includes('admin') || 
+                               (ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
 
             if (userIsAdmin === true && isTestMode) {
                 keyboard.push([{ text: '🛠 Zurück zum Admin-Panel', callback_data: 'admin_panel' }]);
@@ -37,6 +39,7 @@ module.exports = (bot) => {
             }
 
             const text = '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:';
+            // ImageUrl ist hier null, da das Hauptmenü kein Bild braucht
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
 
         } catch (error) {
@@ -84,16 +87,10 @@ module.exports = (bot) => {
             const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
             keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
-            if (product.image_url) {
-                await ctx.replyWithPhoto(product.image_url, {
-                    caption: caption,
-                    parse_mode: 'Markdown',
-                    reply_markup: { inline_keyboard: keyboard }
-                });
-                await ctx.deleteMessage().catch(() => {});
-            } else {
-                await uiHelper.updateOrSend(ctx, caption, { inline_keyboard: keyboard });
-            }
+            // WICHTIG: Wir nutzen jetzt uiHelper für ALLES. 
+            // Wenn product.image_url existiert, wird der Link unsichtbar eingebettet.
+            await uiHelper.updateOrSend(ctx, caption, { inline_keyboard: keyboard }, product.image_url);
+
         } catch (error) {
             console.error(error.message);
         }

@@ -83,6 +83,16 @@ const toggleProductStatus = async (productId, field, value) => {
     return data[0];
 };
 
+const updateProductImage = async (productId, imageUrl) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ image_url: imageUrl })
+        .eq('id', productId)
+        .select();
+    if (error) throw error;
+    return data[0];
+};
+
 const getProductById = async (productId) => {
     const { data, error } = await supabase
         .from('products')
@@ -121,5 +131,6 @@ module.exports = {
     getProductById,
     addProduct,
     toggleProductStatus,
-    updateProductCategory
+    updateProductCategory,
+    updateProductImage
 };
