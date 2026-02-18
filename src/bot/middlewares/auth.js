@@ -1,17 +1,22 @@
 const userRepo = require('../../database/repositories/userRepo');
 const config = require('../../config');
+const uiHelper = require('../../utils/uiHelper');
 
 const isMasterAdmin = async (ctx, next) => {
     try {
         const userId = ctx.from.id;
         
-        if (userId === config.MASTER_ADMIN_ID) {
+        if (userId === Number(config.MASTER_ADMIN_ID)) {
             return next();
         }
         
-        await ctx.reply('Zugriff verweigert: Diese Aktion erfordert Master Admin Rechte.');
+        const text = '⛔ Zugriff verweigert: Master-Admin Rechte erforderlich.';
+        if (ctx.callbackQuery) {
+            return ctx.answerCbQuery(text, { show_alert: true });
+        }
+        return uiHelper.sendTemporary(ctx, text, 5);
     } catch (error) {
-        console.error(error.message);
+        console.error('Auth Error (Master):', error.message);
     }
 };
 
@@ -19,19 +24,24 @@ const isAdmin = async (ctx, next) => {
     try {
         const userId = ctx.from.id;
 
-        if (userId === config.MASTER_ADMIN_ID) {
+        // Master-Admin ist implizit auch Admin
+        if (userId === Number(config.MASTER_ADMIN_ID)) {
             return next();
         }
 
         const role = await userRepo.getUserRole(userId);
         
-        if (role === 'admin') {
+        if (role === 'admin' || role === 'master') {
             return next();
         }
         
-        await ctx.reply('Zugriff verweigert: Diese Aktion erfordert Admin Rechte.');
+        const text = '🚫 Zugriff verweigert: Admin-Rechte erforderlich.';
+        if (ctx.callbackQuery) {
+            return ctx.answerCbQuery(text, { show_alert: true });
+        }
+        return uiHelper.sendTemporary(ctx, text, 5);
     } catch (error) {
-        console.error(error.message);
+        console.error('Auth Error (Admin):', error.message);
     }
 };
 

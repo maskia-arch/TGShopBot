@@ -2,32 +2,45 @@ const { Scenes } = require('telegraf');
 const cartRepo = require('../../database/repositories/cartRepo');
 const uiHelper = require('../../utils/uiHelper');
 
+const cleanup = async (ctx) => {
+    if (ctx.wizard.state.messagesToDelete) {
+        for (const msgId of ctx.wizard.state.messagesToDelete) {
+            ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+        }
+    }
+};
+
 const askQuantityScene = new Scenes.WizardScene(
     'askQuantityScene',
     async (ctx) => {
         ctx.wizard.state.productId = ctx.scene.state.productId;
-        await ctx.reply('Bitte gib die gewünschte Menge als Zahl ein (z.B. 2):', {
+        ctx.wizard.state.messagesToDelete = [];
+
+        const msg = await ctx.reply('🔢 *Menge wählen*\nBitte gib die gewünschte Menge als Zahl ein:', {
+            parse_mode: 'Markdown',
             reply_markup: {
-                inline_keyboard: [[{ text: 'Abbrechen', callback_data: 'cancel_scene' }]]
+                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
             }
         });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery();
-            await uiHelper.updateOrSend(ctx, 'Vorgang abgebrochen.', {
-                inline_keyboard: [[{ text: 'Zurück zum Shop', callback_data: 'shop_menu' }]]
-            });
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, 'Abgebrochen', 2);
             return ctx.scene.leave();
         }
 
         if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         const quantity = parseInt(ctx.message.text, 10);
 
         if (isNaN(quantity) || quantity <= 0) {
-            await ctx.reply('Ungültige Eingabe. Bitte gib eine gültige Zahl größer als 0 ein:');
+            const errorMsg = await ctx.reply('⚠️ Bitte gib eine gültige Zahl ein (z.B. 5):');
+            ctx.wizard.state.messagesToDelete.push(errorMsg.message_id);
             return;
         }
 
@@ -35,17 +48,13 @@ const askQuantityScene = new Scenes.WizardScene(
             const productId = ctx.wizard.state.productId;
             await cartRepo.addToCart(ctx.from.id, productId, quantity);
 
-            const keyboard = [
-                [{ text: '🛍️ Weiter einkaufen', callback_data: 'shop_menu' }],
-                [{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]
-            ];
-
-            await ctx.reply('Erfolgreich zum Warenkorb hinzugefügt.', {
-                reply_markup: { inline_keyboard: keyboard }
-            });
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, `Menge (${quantity}) hinzugefügt!`, 3);
+            await ctx.answerCbQuery('✅ Zum Warenkorb hinzugefügt');
         } catch (error) {
             console.error(error.message);
-            await ctx.reply('Es gab einen Fehler beim Hinzufügen zum Warenkorb.');
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Hinzufügen', 3);
         }
 
         return ctx.scene.leave();

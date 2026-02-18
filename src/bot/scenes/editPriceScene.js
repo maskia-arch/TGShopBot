@@ -1,34 +1,56 @@
 const { Scenes } = require('telegraf');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const productRepo = require('../../database/repositories/productRepo');
+const uiHelper = require('../../utils/uiHelper');
+
+const cleanup = async (ctx) => {
+    if (ctx.wizard.state.messagesToDelete) {
+        for (const msgId of ctx.wizard.state.messagesToDelete) {
+            ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+        }
+    }
+};
 
 const editPriceScene = new Scenes.WizardScene(
     'editPriceScene',
     async (ctx) => {
+        // IDs für Aufräumaktion initialisieren
+        ctx.wizard.state.messagesToDelete = [];
         const productId = ctx.wizard.state.productId;
         const product = await productRepo.getProductById(productId);
         
         ctx.wizard.state.productName = product.name;
         
-        await ctx.reply(`💰 Neuer Preis für "${product.name}"\n\nAktueller Preis: ${product.price}€\n\nBitte sende mir nun den neuen Preis (nur die Zahl, z.B. 24.50):`, {
-            reply_markup: {
-                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+        const msg = await ctx.reply(
+            `💰 *Preisänderung*\nProdukt: "${product.name}"\nAktuell: ${product.price}€\n\nBitte sende mir den neuen Preis:`, 
+            {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                }
             }
-        });
+        );
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
+        // Abbrechen-Logik
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
-            await ctx.reply('Vorgang abgebrochen.');
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
             return ctx.scene.leave();
         }
 
-        const input = ctx.message ? ctx.message.text.replace(',', '.') : null;
+        if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+
+        const input = ctx.message.text.replace(',', '.');
         const newPrice = parseFloat(input);
 
         if (isNaN(newPrice) || newPrice <= 0) {
-            await ctx.reply('⚠️ Ungültiger Preis. Bitte sende eine positive Zahl (z.B. 12.99):');
+            const errorMsg = await ctx.reply('⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):');
+            ctx.wizard.state.messagesToDelete.push(errorMsg.message_id);
             return;
         }
 
@@ -41,13 +63,23 @@ const editPriceScene = new Scenes.WizardScene(
                 newPrice.toFixed(2)
             );
 
-            await ctx.reply(`✅ Anfrage gesendet!\n\nDer Master Admin muss die Preisänderung von ${newPrice.toFixed(2)}€ für "${ctx.wizard.state.productName}" noch bestätigen.`);
-            return ctx.scene.leave();
+            // Alles aufräumen
+            await cleanup(ctx);
+            
+            // Dezente Bestätigung
+            await uiHelper.sendTemporary(
+                ctx, 
+                `Anfrage für ${ctx.wizard.state.productName} (${newPrice.toFixed(2)}€) gesendet!`, 
+                5
+            );
+            
+            await ctx.answerCbQuery('✅ Anfrage an Master gesendet');
         } catch (error) {
             console.error(error.message);
-            await ctx.reply('Fehler beim Erstellen der Anfrage.');
-            return ctx.scene.leave();
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Senden der Anfrage.', 3);
         }
+        return ctx.scene.leave();
     }
 );
 

@@ -2,7 +2,7 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.1.2
+Version: 0.1.3
 
 --- 1. ENVIRONMENT VARIABLES (Render.com) ---
 Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
@@ -16,11 +16,11 @@ PORT               = 10000 (Standard für Render Web Services)
 --- 2. SUPABASE SQL SETUP ---
 Kopiere die folgenden Befehle nacheinander in den SQL Editor deiner Supabase Instanz:
 
--- Tabelle: Users
+-- Tabelle: Users (Kunden und Admins)
 CREATE TABLE users (
     telegram_id BIGINT PRIMARY KEY,
     username TEXT,
-    role TEXT DEFAULT 'customer', -- 'master', 'admin', 'customer'
+    role TEXT DEFAULT 'customer', -- 'admin', 'customer'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -32,7 +32,7 @@ CREATE TABLE categories (
 );
 
 -- Tabelle: Produkte
--- HINWEIS: category_id ist optional (NULL), um kategorielose Produkte zu erlauben.
+-- Erlaubt NULL für category_id (Kategorielose Produkte / Sonstiges)
 CREATE TABLE products (
     id SERIAL PRIMARY KEY,
     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL, 
@@ -41,7 +41,7 @@ CREATE TABLE products (
     price DECIMAL(10,2) NOT NULL,
     is_unit_price BOOLEAN DEFAULT FALSE,
     is_out_of_stock BOOLEAN DEFAULT FALSE,
-    image_url TEXT, -- Dezentrale Links (telegra.ph)
+    image_url TEXT, -- Dezentrale Links (z.B. telegra.ph)
     is_active BOOLEAN DEFAULT TRUE
 );
 
@@ -62,18 +62,20 @@ CREATE TABLE carts (
     quantity INTEGER DEFAULT 1
 );
 
--- Tabelle: Ausstehende Freigaben
+-- Tabelle: Ausstehende Freigaben (Approval-System für Master Admin)
 CREATE TABLE pending_approvals (
     id SERIAL PRIMARY KEY,
     action_type TEXT NOT NULL, -- 'DELETE', 'PRICE_CHANGE'
     requested_by BIGINT REFERENCES users(telegram_id),
-    target_id INTEGER,
-    new_value TEXT,
-    status TEXT DEFAULT 'pending', 
+    target_id INTEGER, -- ID des betroffenen Produkts
+    new_value TEXT,    -- Z.B. der neue Preis
+    status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- OPTIONAL: Falls Tabelle bereits existiert, Kategorie-Zwang entfernen:
--- ALTER TABLE products ALTER COLUMN category_id DROP NOT NULL;
+-- INDEXE für schnellere Abfragen (Empfohlen für v0.1.3)
+CREATE INDEX idx_products_category ON products(category_id);
+CREATE INDEX idx_products_active ON products(is_active);
+CREATE INDEX idx_approvals_status ON pending_approvals(status);
 
 =========================================

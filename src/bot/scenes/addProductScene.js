@@ -1,68 +1,94 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
 const { uploadToDezentral } = require('../../utils/imageUploader');
+const uiHelper = require('../../utils/uiHelper');
+
+const cleanup = async (ctx) => {
+    if (ctx.wizard.state.messagesToDelete) {
+        for (const msgId of ctx.wizard.state.messagesToDelete) {
+            ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+        }
+    }
+};
 
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
     async (ctx) => {
         ctx.wizard.state.productData = {};
+        ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productData.categoryId = ctx.scene.state.categoryId || null;
-        await ctx.reply('Bitte sende den Namen des Produkts:');
+        
+        const msg = await ctx.reply('📦 *Neues Produkt*\nBitte sende den Namen des Produkts:');
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         ctx.wizard.state.productData.name = ctx.message.text;
-        await ctx.reply('Bitte sende die Beschreibung des Produkts:');
+        
+        const msg = await ctx.reply('Bitte sende die Beschreibung:');
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         ctx.wizard.state.productData.description = ctx.message.text;
-        await ctx.reply('Bitte sende den Preis in Euro (z.B. 10.50):');
+        
+        const msg = await ctx.reply('Bitte sende den Preis in Euro (z.B. 10.50):');
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         const price = parseFloat(ctx.message.text.replace(',', '.'));
         if (isNaN(price)) {
-            await ctx.reply('Ungültiger Preis. Bitte sende eine Zahl (z.B. 10.50):');
+            const msg = await ctx.reply('⚠️ Ungültig. Bitte sende eine Zahl:');
+            ctx.wizard.state.messagesToDelete.push(msg.message_id);
             return;
         }
         ctx.wizard.state.productData.price = price;
-        await ctx.reply('Ist dies ein Preis pro Stück?', {
+        
+        const msg = await ctx.reply('Ist dies ein Preis pro Stück?', {
             reply_markup: {
                 keyboard: [[{ text: 'Ja' }, { text: 'Nein' }]],
                 one_time_keyboard: true,
                 resize_keyboard: true
             }
         });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         ctx.wizard.state.productData.isUnitPrice = ctx.message.text.toLowerCase() === 'ja';
-        await ctx.reply('Bitte sende ein Produktbild (als Foto) oder tippe "Überspringen":', {
+        
+        const msg = await ctx.reply('Bitte sende ein Foto oder tippe "Überspringen":', {
             reply_markup: {
                 keyboard: [[{ text: 'Überspringen' }]],
                 one_time_keyboard: true,
                 resize_keyboard: true
             }
         });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
     async (ctx) => {
+        if (ctx.message) ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         let finalImageUrl = null;
 
         if (ctx.message && ctx.message.photo) {
             try {
                 const photo = ctx.message.photo[ctx.message.photo.length - 1];
                 const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-                await ctx.reply('⏳ Bild wird dezentral verarbeitet...');
+                const statusMsg = await ctx.reply('⏳ Bild wird verarbeitet...');
+                ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
                 finalImageUrl = await uploadToDezentral(fileLink.href);
             } catch (error) {
                 console.error('Bild-Upload Fehler:', error.message);
-                await ctx.reply('⚠️ Bild-Upload fehlgeschlagen, fahre ohne Bild fort.');
             }
         }
 
@@ -70,14 +96,12 @@ const addProductScene = new Scenes.WizardScene(
         
         try {
             await productRepo.addProduct(ctx.wizard.state.productData);
-            await ctx.reply('✅ Produkt erfolgreich angelegt!', {
-                reply_markup: { remove_keyboard: true }
-            });
+            await cleanup(ctx); // Alle Fragen und Antworten löschen
+            await uiHelper.sendTemporary(ctx, `Produkt "${ctx.wizard.state.productData.name}" erstellt!`, 3);
         } catch (error) {
             console.error(error.message);
-            await ctx.reply('Fehler beim Speichern des Produkts.', {
-                reply_markup: { remove_keyboard: true }
-            });
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Speichern!', 3);
         }
         return ctx.scene.leave();
     }
