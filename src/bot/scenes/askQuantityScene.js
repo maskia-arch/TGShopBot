@@ -48,11 +48,21 @@ const askQuantityScene = new Scenes.WizardScene(
             const productId = ctx.wizard.state.productId;
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             
-            // Aufruf an das neue cartRepo mit Auto-User-Erstellung
             await cartRepo.addToCart(ctx.from.id, productId, quantity, username);
 
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, `✅ ${quantity}x zum Warenkorb hinzugefügt!`, 3);
+            
+            await ctx.reply(`✅ *${quantity}x zum Warenkorb hinzugefügt!*\n\nWie möchtest du fortfahren?`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }],
+                        [{ text: '🔙 Zurück zum Produkt', callback_data: `product_${productId}` }],
+                        [{ text: '🛍 Shop-Menü', callback_data: 'shop_menu' }]
+                    ]
+                }
+            });
+
         } catch (error) {
             console.error('Quantity Scene Error:', error.message);
             await cleanup(ctx);

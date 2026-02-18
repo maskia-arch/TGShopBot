@@ -58,6 +58,11 @@ module.exports = (bot) => {
             
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
 
+            const cart = await cartRepo.getCart(ctx.from.id);
+            if (cart && cart.length > 0) {
+                keyboard.push([{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]);
+            }
+
             const text = categoryId === null ? '*Sonstige Produkte:*' : '*Verfügbare Produkte:*';
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
 
@@ -85,6 +90,11 @@ module.exports = (bot) => {
             const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
             keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
+            const cart = await cartRepo.getCart(ctx.from.id);
+            if (cart && cart.length > 0) {
+                keyboard.push([{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]);
+            }
+
             await uiHelper.updateOrSend(ctx, caption, { inline_keyboard: keyboard }, product.image_url);
 
         } catch (error) {
@@ -110,6 +120,9 @@ module.exports = (bot) => {
             
             await uiHelper.sendTemporary(ctx, `✅ ${product.name} im Warenkorb!`, 3);
             await ctx.answerCbQuery('Hinzugefügt!');
+
+            ctx.match = [null, productId];
+            bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: `product_${productId}` } });
 
         } catch (error) {
             console.error(error.message);
