@@ -17,6 +17,28 @@ module.exports = (bot) => {
             }
 
             const paymentMethods = await paymentRepo.getActivePaymentMethods();
+
+            // --- FALLBACK: Keine Zahlungsmethoden hinterlegt ---
+            if (!paymentMethods || paymentMethods.length === 0) {
+                const cartTotal = await cartRepo.getCartTotal(userId);
+                const orderDetails = await cartRepo.getCartDetails(userId);
+                
+                // Wir simulieren eine "Manuelle" Zahlungsmethode für den Formatter
+                const manualMethod = { name: 'Privat-Chat / Manuelle Abwicklung', wallet_address: null };
+                
+                const text = "ℹ️ *Manuelle Zahlungsabwicklung*\n\n" +
+                             formatters.formatInvoice(orderDetails, cartTotal, manualMethod) + 
+                             '\n\nEs sind keine automatischen Zahlungsdaten hinterlegt. Die Details klären wir persönlich im Chat.\n\n*Bestellung jetzt abschicken?*';
+                
+                const keyboard = [
+                    [{ text: '✅ Kaufpflichtig bestellen', callback_data: 'confirm_manual' }],
+                    [{ text: '🔙 Zurück zum Warenkorb', callback_data: 'cart_view' }]
+                ];
+                
+                return uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
+            }
+
+            // --- NORMALER FLOW: Auswahl anzeigen ---
             const keyboard = paymentMethods.map(pm => ([{
                 text: pm.name,
                 callback_data: `payment_${pm.id}`
@@ -27,6 +49,31 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, '💳 *Bezahlvorgang*\nBitte wähle deine bevorzugte Zahlungsmethode:', { 
                 inline_keyboard: keyboard 
             });
+        } catch (error) {
+            console.error("Checkout Error:", error.message);
+        }
+    });
+
+    // Handler für Bestellungen ohne spezifische Zahlungsmethode
+    bot.action('confirm_manual', async (ctx) => {
+        try {
+            const userId = ctx.from.id;
+            const username = ctx.from.username || ctx.from.first_name;
+            const orderDetails = await cartRepo.getCartDetails(userId);
+            
+            await notificationService.notifyAdminsNewOrder({
+                userId,
+                username,
+                orderDetails,
+                paymentId: 'MANUAL' // Markierung für Admins
+            });
+
+            await cartRepo.clearCart(userId);
+
+            const text = '🎉 *Vielen Dank für deine Bestellung!*\n\nDeine Anfrage wurde übermittelt. Ein Admin wird dich in Kürze kontaktieren, um die Zahlung privat zu klären.';
+            const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'shop_menu' }]];
+
+            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
@@ -64,7 +111,6 @@ module.exports = (bot) => {
             const orderDetails = await cartRepo.getCartDetails(userId);
             const paymentMethod = await paymentRepo.getPaymentMethod(paymentId);
             
-            // Admins über neue Bestellung informieren
             await notificationService.notifyAdminsNewOrder({
                 userId,
                 username,
@@ -72,13 +118,11 @@ module.exports = (bot) => {
                 paymentId
             });
 
-            // Warenkorb leeren
             await cartRepo.clearCart(userId);
 
-            // Dynamische Anzeige der Zahlungsdetails für den Kunden
             let text = '🎉 *Vielen Dank für deine Bestellung!*\n\n';
             
-            if (paymentMethod.wallet_address) {
+            if (paymentMethod && paymentMethod.wallet_address) {
                 text += `Bitte sende den Betrag an folgende Adresse:\n\n` +
                         `📍 *${paymentMethod.name} Adresse:*\n` +
                         `\`${paymentMethod.wallet_address}\`\n\n` +

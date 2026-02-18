@@ -20,7 +20,6 @@ const sendBroadcast = async (messageText, senderId) => {
         let failCount = 0;
         const failedUsers = [];
 
-        // Nachricht an alle Kunden senden
         for (const customer of customers) {
             try {
                 await bot.telegram.sendMessage(customer.telegram_id, messageText, { 
@@ -28,7 +27,6 @@ const sendBroadcast = async (messageText, senderId) => {
                 });
                 successCount++;
             } catch (error) {
-                // Fehlercodes für Blockierung oder gelöschte Chats abfangen
                 if (error.description.includes('forbidden') || error.description.includes('blocked') || error.description.includes('chat not found')) {
                     failedUsers.push(customer);
                 }
@@ -36,20 +34,17 @@ const sendBroadcast = async (messageText, senderId) => {
             }
         }
 
-        // Ergebnisbericht erstellen
         const report = `📢 *Broadcast Report*\n\n` +
                        `✅ Erfolgreich: ${successCount}\n` +
                        `❌ Fehlgeschlagen: ${failCount}\n\n` +
                        `Gesendet von ID: ${senderId}`;
 
-        // Alle Admins und Master informieren
         const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
         const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
 
         for (const staff of uniqueStaff) {
             const keyboard = { inline_keyboard: [] };
             
-            // Wenn es Fehler gab, dem Master direkt die Bereinigung anbieten
             if (failCount > 0 && Number(staff.telegram_id) === Number(config.MASTER_ADMIN_ID)) {
                 keyboard.inline_keyboard.push([{ text: '🗑 Blockierte User bereinigen', callback_data: 'master_cleanup_blocked' }]);
             }
@@ -68,15 +63,27 @@ const sendBroadcast = async (messageText, senderId) => {
 
 /**
  * Informiert Admins über eine neue Bestellung
+ * Unterstützt nun paymentId 'MANUAL' für Bestellungen ohne hinterlegte Zahlungsart
  */
 const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId }) => {
     try {
-        const paymentMethod = await paymentRepo.getPaymentMethod(paymentId);
+        let paymentMethodName = "Manuelle Abwicklung / Privat-Chat";
+        
+        // Nur in DB suchen, wenn eine echte ID vorhanden ist
+        if (paymentId !== 'MANUAL') {
+            try {
+                const method = await paymentRepo.getPaymentMethod(paymentId);
+                if (method) paymentMethodName = method.name;
+            } catch (e) {
+                console.warn("Payment method fetch failed, using fallback name.");
+            }
+        }
+
         const admins = await userRepo.getAllAdmins();
         
         let orderText = `🛍️ *Neue Bestellung*\n\n`;
         orderText += `👤 Kunde: ${username} (ID: ${userId})\n`;
-        orderText += `💳 Zahlung: ${paymentMethod.name}\n\n`;
+        orderText += `💳 Zahlung: ${paymentMethodName}\n\n`;
         orderText += `📦 Details:\n`;
         
         let total = 0;
