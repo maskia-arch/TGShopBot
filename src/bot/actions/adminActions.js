@@ -14,7 +14,6 @@ module.exports = (bot) => {
                     [{ text: '👁 Kundenansicht testen', callback_data: 'shop_menu' }]
                 ]
             };
-            // Nutzt editMessageText, um Nachrichten zu aktualisieren statt neu zu senden
             await uiHelper.updateOrSend(ctx, '🛠 *Admin-Zentrale*\nWas möchtest du tun?', keyboard);
         } catch (error) {
             console.error(error.message);
@@ -60,7 +59,6 @@ module.exports = (bot) => {
 
     bot.action(/^admin_rename_cat_(.+)$/, isAdmin, async (ctx) => {
         try {
-            // Szenen löschen ihre Start-Nachricht nach Abschluss selbst (Auto-Cleanup)
             await ctx.scene.enter('renameCategoryScene', { categoryId: ctx.match[1] });
         } catch (error) {
             console.error(error.message);
@@ -73,7 +71,6 @@ module.exports = (bot) => {
             await productRepo.deleteCategory(categoryId);
             await ctx.answerCbQuery('✅ Kategorie gelöscht!');
             
-            // Sofortiges Update der Ansicht ohne neue Nachricht
             const categories = await productRepo.getActiveCategories();
             const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `admin_edit_cat_${c.id}` }]));
             keyboard.push([{ text: '➕ Neue Kategorie', callback_data: 'admin_add_category' }]);
@@ -147,7 +144,6 @@ module.exports = (bot) => {
                     [{ text: '📁 Kategorie verschieben', callback_data: `admin_move_prod_${p.id}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${p.id}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${p.id}` }],
-                    // FIX: Führt jetzt garantiert zurück zur Admin-Produktliste statt in den Shop
                     [{ text: '🔙 Zurück zur Liste', callback_data: p.category_id ? `admin_prod_cat_${p.category_id}` : 'admin_prod_cat_none' }]
                 ]
             };
@@ -194,7 +190,6 @@ module.exports = (bot) => {
             await productRepo.toggleProductStatus(productId, field, !p[field]);
             await ctx.answerCbQuery('Status aktualisiert!');
             
-            // Re-Trigger der aktuellen Ansicht für visuelles Update
             const updatedP = await productRepo.getProductById(productId);
             const stockLabel = updatedP.is_out_of_stock ? '✅ Wieder auf "Lagernd"' : '📦 Auf "Ausverkauft" setzen';
             const visLabel = updatedP.is_active ? '👻 Unsichtbar machen' : '👁 Öffentlich schalten';
