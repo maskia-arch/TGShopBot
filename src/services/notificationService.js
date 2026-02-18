@@ -8,9 +8,6 @@ const init = (botInstance) => {
     bot = botInstance;
 };
 
-/**
- * Sendet eine Nachricht an alle registrierten Kunden und meldet Fehler an Admins
- */
 const sendBroadcast = async (messageText, senderId) => {
     try {
         const customers = await userRepo.getAllCustomers();
@@ -57,25 +54,20 @@ const sendBroadcast = async (messageText, senderId) => {
 
         return { successCount, failCount, failedUsers };
     } catch (error) {
-        console.error('Broadcast Error:', error.message);
+        console.error(error.message);
     }
 };
 
-/**
- * Informiert Admins über eine neue Bestellung
- * Unterstützt nun paymentId 'MANUAL' für Bestellungen ohne hinterlegte Zahlungsart
- */
 const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId }) => {
     try {
         let paymentMethodName = "Manuelle Abwicklung / Privat-Chat";
         
-        // Nur in DB suchen, wenn eine echte ID vorhanden ist
         if (paymentId !== 'MANUAL') {
             try {
                 const method = await paymentRepo.getPaymentMethod(paymentId);
                 if (method) paymentMethodName = method.name;
             } catch (e) {
-                console.warn("Payment method fetch failed, using fallback name.");
+                console.warn(e.message);
             }
         }
 
@@ -110,28 +102,32 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
             }).catch(() => {});
         }
     } catch (error) {
-        console.error('Notification Error (Order):', error.message);
+        console.error(error.message);
     }
 };
 
-/**
- * Informiert den Master-Admin über eine neue Freigabeanfrage
- */
-const notifyMasterNewApproval = async (request) => {
+const notifyMasterApproval = async ({ approvalId, actionType, productId, productName, requestedBy, newValue }) => {
     try {
         const masterId = config.MASTER_ADMIN_ID;
         if (!masterId) return;
 
-        let typeLabel = request.action_type === 'DELETE' ? '🗑 LÖSCHUNG' : '💰 PREISÄNDERUNG';
+        const typeLabel = actionType === 'DELETE' ? '🗑 LÖSCHUNG' : '💰 PREISÄNDERUNG';
         
         let text = `⚖️ *Neue Freigabeanfrage*\n\n`;
-        text += `Typ: ${typeLabel}\n`;
-        text += `Von Admin-ID: ${request.requested_by}\n`;
-        if (request.new_value) text += `Neuer Wert: ${request.new_value}\n`;
-        text += `\nBitte prüfe das Master-Panel für die Entscheidung.`;
+        text += `Typ: *${typeLabel}*\n`;
+        text += `Produkt: ${productName}\n`;
+        text += `Von: ${requestedBy}\n`;
+        
+        if (newValue) {
+            text += `Neuer Wert: *${newValue}€*\n`;
+        }
 
         const keyboard = {
             inline_keyboard: [
+                [
+                    { text: '✅ Annehmen', callback_data: `master_approve_${approvalId}` },
+                    { text: '❌ Ablehnen', callback_data: `master_reject_${approvalId}` }
+                ],
                 [{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]
             ]
         };
@@ -141,7 +137,7 @@ const notifyMasterNewApproval = async (request) => {
             reply_markup: keyboard
         }).catch(() => {});
     } catch (error) {
-        console.error('Notification Error (Approval):', error.message);
+        console.error(error.message);
     }
 };
 
@@ -149,5 +145,5 @@ module.exports = {
     init,
     sendBroadcast,
     notifyAdminsNewOrder,
-    notifyMasterNewApproval
+    notifyMasterApproval
 };

@@ -4,6 +4,7 @@ const uiHelper = require('../../utils/uiHelper');
 const { isAdmin } = require('../middlewares/auth');
 const formatters = require('../../utils/formatters');
 const config = require('../../config');
+const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
     bot.action('admin_panel', isAdmin, async (ctx) => {
@@ -166,7 +167,6 @@ module.exports = (bot) => {
                 ]
             };
             
-            // Wichtig: Hier wird die image_url an den uiHelper übergeben, damit Admins das Bild sehen
             await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${p.name}*`, keyboard, p.image_url);
         } catch (error) {
             console.error(error.message);
@@ -175,7 +175,6 @@ module.exports = (bot) => {
 
     bot.action(/^admin_edit_img_(.+)$/, isAdmin, async (ctx) => {
         try {
-            // Startet die neue Scene zum Ändern des Bildes
             await ctx.scene.enter('editProductImageScene', { productId: ctx.match[1] });
         } catch (error) {
             console.error(error.message);
@@ -233,7 +232,6 @@ module.exports = (bot) => {
                     [{ text: '🔙 Zurück zur Liste', callback_data: updatedP.category_id ? `admin_prod_cat_${updatedP.category_id}` : 'admin_prod_cat_none' }]
                 ]
             };
-            // Auch hier beim Update das Bild mitsenden
             await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${updatedP.name}*`, keyboard, updatedP.image_url);
         } catch (error) {
             console.error(error.message);
@@ -242,7 +240,22 @@ module.exports = (bot) => {
 
     bot.action(/^admin_req_del_(.+)$/, isAdmin, async (ctx) => {
         try {
-            await approvalRepo.createApprovalRequest('DELETE', ctx.from.id, ctx.match[1]);
+            const productId = ctx.match[1];
+            const approval = await approvalRepo.createApprovalRequest('DELETE', ctx.from.id, productId);
+            
+            const product = await productRepo.getProductById(productId);
+            const requestedBy = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+
+            if (notificationService.notifyMasterApproval) {
+                await notificationService.notifyMasterApproval({
+                    approvalId: approval ? approval.id : 'NEW',
+                    actionType: 'DELETE',
+                    productId: productId,
+                    productName: product ? product.name : 'Unbekanntes Produkt',
+                    requestedBy: requestedBy
+                });
+            }
+
             await ctx.answerCbQuery('Löschanfrage gesendet!', { show_alert: true });
         } catch (error) {
             console.error(error.message);

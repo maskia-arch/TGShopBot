@@ -132,7 +132,7 @@ module.exports = (bot) => {
             const pending = await approvalRepo.getPendingApprovals();
             if (pending.length === 0) {
                 return uiHelper.updateOrSend(ctx, '✅ Keine ausstehenden Freigaben.', {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
+                    inline_keyboard: [[{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]]
                 });
             }
 
@@ -140,7 +140,7 @@ module.exports = (bot) => {
                 text: `${p.action_type === 'DELETE' ? '🗑' : '💰'} ID:${p.target_id} von ${p.requested_by}`, 
                 callback_data: `master_view_appr_${p.id}` 
             }]));
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            keyboard.push([{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]);
 
             await uiHelper.updateOrSend(ctx, '📋 *Ausstehende Anfragen:*', { inline_keyboard: keyboard });
         } catch (error) {
@@ -166,7 +166,7 @@ module.exports = (bot) => {
                         { text: '✅ Annehmen', callback_data: `master_approve_${approvalId}` },
                         { text: '❌ Ablehnen', callback_data: `master_reject_${approvalId}` }
                     ],
-                    [{ text: '🔙 Zurück', callback_data: 'master_pending_approvals' }]
+                    [{ text: '🔙 Zurück zur Queue', callback_data: 'master_pending_approvals' }]
                 ]
             };
 
@@ -191,7 +191,7 @@ module.exports = (bot) => {
             await ctx.answerCbQuery('✅ Anfrage genehmigt!');
             
             await uiHelper.updateOrSend(ctx, '✅ Die Änderung wurde erfolgreich im System übernommen.', {
-                inline_keyboard: [[{ text: '🔙 Zurück zur Queue', callback_data: 'master_pending_approvals' }]]
+                inline_keyboard: [[{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]]
             });
         } catch (error) {
             console.error(error.message);
@@ -203,11 +203,9 @@ module.exports = (bot) => {
             await approvalRepo.updateApprovalStatus(ctx.match[1], 'rejected');
             await ctx.answerCbQuery('❌ Abgelehnt.');
             
-            const pending = await approvalRepo.getPendingApprovals();
-            const keyboard = pending.map(p => ([{ text: `${p.action_type}: ID ${p.target_id}`, callback_data: `master_view_appr_${p.id}` }]));
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
-            
-            await uiHelper.updateOrSend(ctx, 'Anfrage wurde abgelehnt und entfernt.', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '❌ Die Anfrage wurde abgelehnt und aus dem System entfernt.', { 
+                inline_keyboard: [[{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]]
+            });
         } catch (error) {
             console.error(error.message);
         }

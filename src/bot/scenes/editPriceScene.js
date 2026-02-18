@@ -2,6 +2,7 @@ const { Scenes } = require('telegraf');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const productRepo = require('../../database/repositories/productRepo');
 const uiHelper = require('../../utils/uiHelper');
+const notificationService = require('../../services/notificationService');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -14,7 +15,6 @@ const cleanup = async (ctx) => {
 const editPriceScene = new Scenes.WizardScene(
     'editPriceScene',
     async (ctx) => {
-        // IDs für Aufräumaktion initialisieren
         ctx.wizard.state.messagesToDelete = [];
         const productId = ctx.wizard.state.productId;
         const product = await productRepo.getProductById(productId);
@@ -34,7 +34,6 @@ const editPriceScene = new Scenes.WizardScene(
         return ctx.wizard.next();
     },
     async (ctx) => {
-        // Abbrechen-Logik
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
@@ -56,20 +55,33 @@ const editPriceScene = new Scenes.WizardScene(
 
         try {
             const productId = ctx.wizard.state.productId;
-            await approvalRepo.createApprovalRequest(
+            const formattedPrice = newPrice.toFixed(2);
+            
+            const approval = await approvalRepo.createApprovalRequest(
                 'PRICE_CHANGE', 
                 ctx.from.id, 
                 productId, 
-                newPrice.toFixed(2)
+                formattedPrice
             );
 
-            // Alles aufräumen
+            const requestedBy = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+
+            if (notificationService.notifyMasterApproval) {
+                await notificationService.notifyMasterApproval({
+                    approvalId: approval ? approval.id : 'NEW',
+                    actionType: 'PRICE_CHANGE',
+                    productId: productId,
+                    productName: ctx.wizard.state.productName,
+                    requestedBy: requestedBy,
+                    newValue: formattedPrice
+                });
+            }
+
             await cleanup(ctx);
             
-            // Dezente Bestätigung
             await uiHelper.sendTemporary(
                 ctx, 
-                `Anfrage für ${ctx.wizard.state.productName} (${newPrice.toFixed(2)}€) gesendet!`, 
+                `Anfrage für ${ctx.wizard.state.productName} (${formattedPrice}€) gesendet!`, 
                 5
             );
             
