@@ -12,7 +12,6 @@ module.exports = (bot) => {
             
             keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
 
-            // Rechte-Prüfung für die UI
             const userIsAdmin = await new Promise(resolve => {
                 isAdmin(ctx, () => resolve(true)).catch(() => resolve(false));
             });
@@ -72,7 +71,6 @@ module.exports = (bot) => {
             keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
             if (product.image_url) {
-                // Foto senden und alte Text-Nachricht entfernen
                 await ctx.replyWithPhoto(product.image_url, {
                     caption: caption,
                     parse_mode: 'Markdown',
@@ -102,10 +100,7 @@ module.exports = (bot) => {
 
             await cartRepo.addToCart(ctx.from.id, productId, 1);
             
-            // Nutzt sendTemporary für eine saubere Bestätigung (löscht sich nach 3 Sek)
             await uiHelper.sendTemporary(ctx, `✅ ${product.name} im Warenkorb!`, 3);
-            
-            // Kleiner visueller Alert zusätzlich
             await ctx.answerCbQuery('Hinzugefügt!');
 
         } catch (error) {

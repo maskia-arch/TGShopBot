@@ -10,6 +10,7 @@ module.exports = (bot) => {
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
 
+            // User in DB anlegen oder aktualisieren
             await userRepo.upsertUser(userId, username);
 
             const role = await userRepo.getUserRole(userId);
@@ -17,13 +18,18 @@ module.exports = (bot) => {
             let text = `Willkommen beim *Shop Bot*!\n\n`;
             let keyboard;
 
-            if (role === 'master') {
+            // Priorität 1: Hardcoded Master ID aus der Config
+            if (userId === config.MASTER_ADMIN_ID) {
                 text += `🔧 *Master Panel* (v${config.VERSION})`;
                 keyboard = masterMenu();
-            } else if (role === 'admin') {
+            } 
+            // Priorität 2: Rollen aus der Datenbank
+            else if (role === 'admin') {
                 text += `🛠 *Admin Bereich*`;
                 keyboard = adminMenu();
-            } else {
+            } 
+            // Standard: Kunde
+            else {
                 text += `Bitte wähle eine Option aus dem Menü:`;
                 keyboard = customerMenu();
             }
@@ -33,7 +39,7 @@ module.exports = (bot) => {
                 parse_mode: 'Markdown' 
             });
         } catch (error) {
-            console.error(error.message);
+            console.error('Start Command Error:', error.message);
         }
     });
 };
