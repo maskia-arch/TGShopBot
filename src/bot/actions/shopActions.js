@@ -14,6 +14,7 @@ const customerMenu = require('../keyboards/customerMenu');
 module.exports = (bot) => {
     bot.action('shop_menu', async (ctx) => {
         try {
+            const userId = ctx.from.id;
             const allCategories = await productRepo.getActiveCategories();
             const keyboard = [];
 
@@ -31,14 +32,14 @@ module.exports = (bot) => {
                 keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
             }
 
-            const userIsAdmin = await new Promise(resolve => {
-                isAdmin(ctx, () => resolve(true)).catch(() => resolve(false));
-            });
+            // Sicherere Prüfung der Rolle und des Ursprungs
+            const role = await userRepo.getUserRole(userId);
+            const userIsAdmin = (role === 'admin' || userId === Number(config.MASTER_ADMIN_ID));
+            
+            // Nur wenn der Button-Klick explizit "admin" im Data-Feld hat
+            const fromAdminContext = ctx.callbackQuery.data.includes('admin');
 
-            const isTestMode = ctx.callbackQuery.data.includes('admin') || 
-                               (ctx.callbackQuery.message && ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
-
-            if (userIsAdmin === true && isTestMode) {
+            if (userIsAdmin && fromAdminContext) {
                 keyboard.push([{ text: '🛠 Zurück zum Admin-Panel', callback_data: 'admin_panel' }]);
             } else {
                 keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);

@@ -72,6 +72,8 @@ module.exports = (bot) => {
             await cartRepo.clearCart(userId);
 
             const text = '🎉 *Vielen Dank für deine Bestellung!*\n\nDeine Anfrage wurde übermittelt. Ein Admin wird dich in Kürze kontaktieren, um die Zahlung privat zu klären.';
+            
+            // Geändert: Führt nun zum echten Hauptmenü (start.js)
             const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
@@ -130,6 +132,7 @@ module.exports = (bot) => {
                 `${cartTotal}€`
             ) + '\n\nEin Admin wird deine Zahlung prüfen und sich schnellstmöglich bei dir melden.';
             
+            // Geändert: Führt nun zum echten Hauptmenü (start.js)
             const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
