@@ -4,12 +4,15 @@ const uiHelper = require('../../utils/uiHelper');
 const { isAdmin } = require('../middlewares/auth');
 const formatters = require('../../utils/formatters');
 const config = require('../../config');
+const texts = require('../../utils/texts');
 const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
     bot.action('admin_panel', isAdmin, async (ctx) => {
         try {
-            const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
+            const userId = ctx.from.id;
+            const role = await require('../../database/repositories/userRepo').getUserRole(userId);
+            const isMaster = userId === Number(config.MASTER_ADMIN_ID);
             
             const keyboard = {
                 inline_keyboard: [
@@ -24,7 +27,7 @@ module.exports = (bot) => {
                 keyboard.inline_keyboard.unshift([{ text: '👑 Zum Master-Dashboard', callback_data: 'master_panel' }]);
             }
 
-            await uiHelper.updateOrSend(ctx, '🛠 *Admin-Zentrale*\nWas möchtest du tun?', keyboard);
+            await uiHelper.updateOrSend(ctx, texts.getWelcomeText(isMaster, role), keyboard);
         } catch (error) {
             console.error(error.message);
         }
@@ -49,7 +52,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '➕ Neue Kategorie', callback_data: 'admin_add_category' }]);
             keyboard.push([{ text: '🔙 Zurück zum Admin-Menü', callback_data: 'admin_panel' }]);
 
-            await uiHelper.updateOrSend(ctx, 'Kategorien verwalten:', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '📁 *Kategorien verwalten*\nWähle eine Kategorie zum Bearbeiten:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
@@ -120,7 +123,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '➕ Neues Produkt (Kategorielos)', callback_data: 'admin_add_prod_to_none' }]);
             keyboard.push([{ text: '🔙 Zurück zum Admin-Menü', callback_data: 'admin_panel' }]);
 
-            await uiHelper.updateOrSend(ctx, 'Wähle eine Kategorie:', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '📦 *Produkte verwalten*\nWähle eine Kategorie:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
@@ -141,7 +144,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '➕ Produkt hinzufügen', callback_data: `admin_add_prod_to_${ctx.match[1]}` }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]);
 
-            await uiHelper.updateOrSend(ctx, 'Produkte verwalten:', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, 'Wähle ein Produkt zum Bearbeiten:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }

@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const notificationService = require('../../services/notificationService');
 const uiHelper = require('../../utils/uiHelper');
+const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -13,7 +14,7 @@ const cleanup = async (ctx) => {
 
 const cancelAndLeave = async (ctx) => {
     await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, 'Broadcast abgebrochen.', 2);
+    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
     return ctx.scene.leave();
 };
 
@@ -41,10 +42,10 @@ const broadcastScene = new Scenes.WizardScene(
 
         if (!ctx.message || !ctx.message.text) return;
 
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Broadcast zu erstellen.\n\n${ctx.wizard.state.lastQuestion}`, {
@@ -57,8 +58,8 @@ const broadcastScene = new Scenes.WizardScene(
             return;
         }
 
-        ctx.wizard.state.broadcastText = text;
-        const previewText = `📝 *Vorschau deiner Nachricht:*\n\n---\n${text}\n---\n\n*Möchtest du diese Nachricht jetzt an alle Kunden senden?*`;
+        ctx.wizard.state.broadcastText = input;
+        const previewText = `📝 *Vorschau deiner Nachricht:*\n\n---\n${input}\n---\n\n*Möchtest du diese Nachricht jetzt an alle Kunden senden?*`;
         ctx.wizard.state.lastQuestion = previewText;
 
         const msg = await ctx.reply(previewText, {
@@ -111,9 +112,9 @@ const broadcastScene = new Scenes.WizardScene(
 
         if (ctx.message && ctx.message.text) {
             ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-            const text = ctx.message.text;
+            const input = ctx.message.text;
             
-            if (text.startsWith('/')) {
+            if (input.startsWith('/')) {
                 try { await ctx.deleteMessage(); } catch (e) {}
             }
             

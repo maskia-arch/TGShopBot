@@ -4,6 +4,7 @@ const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
 const formatters = require('../../utils/formatters');
 const config = require('../../config');
+const texts = require('../../utils/texts');
 const { isAdmin } = require('../middlewares/auth');
 
 const masterMenu = require('../keyboards/masterMenu');
@@ -88,7 +89,7 @@ module.exports = (bot) => {
 
             const keyboard = [];
             if (product.is_out_of_stock) {
-                caption += '\n\n⚠️ _Dieses Produkt ist zurzeit leider ausverkauft._';
+                caption += `\n\n${texts.getOutOfStockError()}`;
                 keyboard.push([{ text: '❌ Nicht verfügbar', callback_data: 'noop' }]);
             } else {
                 keyboard.push([{ text: '🛒 In den Warenkorb', callback_data: `add_to_cart_${product.id}` }]);
@@ -115,7 +116,7 @@ module.exports = (bot) => {
             const product = await productRepo.getProductById(productId);
 
             if (product.is_out_of_stock) {
-                return ctx.answerCbQuery('Fehler: Produkt ist ausverkauft.');
+                return ctx.answerCbQuery(texts.getOutOfStockError());
             }
 
             if (product.is_unit_price) {
@@ -125,7 +126,7 @@ module.exports = (bot) => {
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             await cartRepo.addToCart(ctx.from.id, productId, 1, username);
             
-            await uiHelper.sendTemporary(ctx, `✅ ${product.name} im Warenkorb!`, 3);
+            await uiHelper.sendTemporary(ctx, texts.getAddToCartSuccess(product.name), 3);
             await ctx.answerCbQuery('Hinzugefügt!');
 
             ctx.match = [null, productId];
@@ -137,7 +138,7 @@ module.exports = (bot) => {
     });
 
     bot.action('noop', async (ctx) => {
-        await ctx.answerCbQuery('Dieses Produkt ist momentan nicht auf Lager.', { show_alert: true });
+        await ctx.answerCbQuery(texts.getOutOfStockError().replace(/⚠️\s*/, ''), { show_alert: true });
     });
 
     bot.action('back_to_main', async (ctx) => {
@@ -146,19 +147,12 @@ module.exports = (bot) => {
             const role = await userRepo.getUserRole(userId);
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
-            let text = `Willkommen beim *Shop Bot*!\n\n`;
+            const text = texts.getWelcomeText(isMaster, role);
             let keyboard;
 
-            if (isMaster) {
-                text += `👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
-                keyboard = masterMenu();
-            } else if (role === 'admin') {
-                text += `🛠 *Admin-Bereich*\n\nVerwalten Sie Produkte und Kategorien.`;
-                keyboard = adminMenu();
-            } else {
-                text += `Bitte wähle eine Option aus dem Menü:`;
-                keyboard = customerMenu();
-            }
+            if (isMaster) keyboard = masterMenu();
+            else if (role === 'admin') keyboard = adminMenu();
+            else keyboard = customerMenu();
 
             await uiHelper.updateOrSend(ctx, text, keyboard);
         } catch (error) {
@@ -168,22 +162,10 @@ module.exports = (bot) => {
 
     bot.action(/^(info|help|info_menu|help_menu)$/, async (ctx) => {
         try {
-            const text = `ℹ️ *Hilfe & Informationen*\n\n` +
-                         `*Version:* ${config.VERSION}\n\n` +
-                         `🛍 *Wie kaufe ich hier ein?*\n\n` +
-                         `1️⃣ *Shop durchsuchen:* Wähle eine Kategorie und dann dein gewünschtes Produkt aus.\n` +
-                         `2️⃣ *In den Warenkorb:* Bestimme die Menge und lege das Produkt in den Warenkorb.\n` +
-                         `3️⃣ *Bestellung aufgeben:* Gehe zum Warenkorb, wähle eine Zahlungsart und schließe den Kauf ab.\n` +
-                         `4️⃣ *Warten:* Nach dem Absenden erhältst du eine Bestätigung. Wir kümmern uns umgehend um deine Bestellung!\n\n` +
-                         `Bei weiteren Fragen wende dich gerne direkt an den Support.`;
-
             const keyboard = {
-                inline_keyboard: [
-                    [{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]
-                ]
+                inline_keyboard: [[{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]]
             };
-
-            await uiHelper.updateOrSend(ctx, text, keyboard);
+            await uiHelper.updateOrSend(ctx, texts.getHelpText(), keyboard);
         } catch (error) {
             console.error(error.message);
         }

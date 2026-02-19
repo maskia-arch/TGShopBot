@@ -4,6 +4,7 @@ const orderRepo = require('../../database/repositories/orderRepo');
 const uiHelper = require('../../utils/uiHelper');
 const notificationService = require('../../services/notificationService');
 const formatters = require('../../utils/formatters');
+const texts = require('../../utils/texts');
 
 module.exports = (bot) => {
     bot.action('checkout', async (ctx) => {
@@ -12,7 +13,7 @@ module.exports = (bot) => {
             const cart = await cartRepo.getCart(userId);
 
             if (!cart || cart.length === 0) {
-                return uiHelper.updateOrSend(ctx, 'Dein Warenkorb ist leer.', {
+                return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
                     inline_keyboard: [[{ text: 'Zurück zum Shop', callback_data: 'shop_menu' }]]
                 });
             }
@@ -44,7 +45,7 @@ module.exports = (bot) => {
             
             keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cart_view' }]);
 
-            await uiHelper.updateOrSend(ctx, '💳 *Bezahlvorgang*\nBitte wähle deine bevorzugte Zahlungsmethode:', { 
+            await uiHelper.updateOrSend(ctx, texts.getCheckoutSelectPayment(), { 
                 inline_keyboard: keyboard 
             });
         } catch (error) {
@@ -71,7 +72,7 @@ module.exports = (bot) => {
             await cartRepo.clearCart(userId);
 
             const text = '🎉 *Vielen Dank für deine Bestellung!*\n\nDeine Anfrage wurde übermittelt. Ein Admin wird dich in Kürze kontaktieren, um die Zahlung privat zu klären.';
-            const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'shop_menu' }]];
+            const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
@@ -123,18 +124,13 @@ module.exports = (bot) => {
 
             await cartRepo.clearCart(userId);
 
-            let text = '🎉 *Vielen Dank für deine Bestellung!*\n\n';
+            const text = texts.getCheckoutFinalInstructions(
+                paymentMethod.name, 
+                paymentMethod.wallet_address, 
+                `${cartTotal}€`
+            ) + '\n\nEin Admin wird deine Zahlung prüfen und sich schnellstmöglich bei dir melden.';
             
-            if (paymentMethod && paymentMethod.wallet_address) {
-                text += `Bitte sende den Betrag an folgende Adresse:\n\n` +
-                        `📍 *${paymentMethod.name} Adresse:*\n` +
-                        `\`${paymentMethod.wallet_address}\`\n\n` +
-                        `_Tippe auf die Adresse, um sie zu kopieren._\n\n`;
-            }
-
-            text += 'Ein Admin wird deine Zahlung prüfen und sich schnellstmöglich bei dir melden.';
-            
-            const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'shop_menu' }]];
+            const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {

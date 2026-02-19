@@ -3,6 +3,7 @@ const approvalRepo = require('../../database/repositories/approvalRepo');
 const productRepo = require('../../database/repositories/productRepo');
 const uiHelper = require('../../utils/uiHelper');
 const notificationService = require('../../services/notificationService');
+const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -15,7 +16,7 @@ const cleanup = async (ctx) => {
 
 const cancelAndLeave = async (ctx) => {
     await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
     return ctx.scene.leave();
 };
 
@@ -49,10 +50,10 @@ const editPriceScene = new Scenes.WizardScene(
 
         if (!ctx.message || !ctx.message.text) return;
         
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Preis zu ändern.\n\n${ctx.wizard.state.lastQuestion}`, {
@@ -65,8 +66,8 @@ const editPriceScene = new Scenes.WizardScene(
             return;
         }
 
-        const input = text.replace(',', '.');
-        const newPrice = parseFloat(input);
+        const cleanInput = input.replace(',', '.');
+        const newPrice = parseFloat(cleanInput);
 
         if (isNaN(newPrice) || newPrice <= 0) {
             ctx.wizard.state.lastQuestion = '⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):';
@@ -109,7 +110,7 @@ const editPriceScene = new Scenes.WizardScene(
         } catch (error) {
             console.error(error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Senden der Anfrage.', 3);
+            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
         }
         
         return ctx.scene.leave();

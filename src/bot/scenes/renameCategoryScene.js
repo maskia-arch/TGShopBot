@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
 const uiHelper = require('../../utils/uiHelper');
+const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -13,7 +14,7 @@ const cleanup = async (ctx) => {
 
 const cancelAndLeave = async (ctx) => {
     await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
     return ctx.scene.leave();
 };
 
@@ -42,10 +43,10 @@ const renameCategoryScene = new Scenes.WizardScene(
 
         if (!ctx.message || !ctx.message.text) return;
         
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Kategorie umzubenennen.\n\n${ctx.wizard.state.lastQuestion}`, {
@@ -59,13 +60,13 @@ const renameCategoryScene = new Scenes.WizardScene(
         }
         
         try {
-            await productRepo.renameCategory(ctx.wizard.state.categoryId, text);
+            await productRepo.renameCategory(ctx.wizard.state.categoryId, input);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, `✅ Kategorie in "${text}" umbenannt!`, 3);
+            await uiHelper.sendTemporary(ctx, `✅ Kategorie in "${input}" umbenannt!`, 3);
         } catch (error) {
             console.error(error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Umbenennen.', 3);
+            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
         }
         
         return ctx.scene.leave();

@@ -1,6 +1,7 @@
 const { Scenes } = require('telegraf');
 const cartRepo = require('../../database/repositories/cartRepo');
 const uiHelper = require('../../utils/uiHelper');
+const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -32,16 +33,16 @@ const askQuantityScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+            await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
             return ctx.scene.leave();
         }
 
         if (!ctx.message || !ctx.message.text) return;
         
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Menge auszuwählen.\n\n${ctx.wizard.state.lastQuestion}`, {
@@ -55,7 +56,7 @@ const askQuantityScene = new Scenes.WizardScene(
             return;
         }
 
-        const quantity = parseInt(text, 10);
+        const quantity = parseInt(input, 10);
 
         if (isNaN(quantity) || quantity <= 0) {
             ctx.wizard.state.lastQuestion = '⚠️ Bitte gib eine gültige Zahl ein (z.B. 5):';
@@ -91,7 +92,7 @@ const askQuantityScene = new Scenes.WizardScene(
         } catch (error) {
             console.error(error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Hinzufügen', 3);
+            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
         }
 
         return ctx.scene.leave();

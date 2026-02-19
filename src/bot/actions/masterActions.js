@@ -6,12 +6,14 @@ const orderRepo = require('../../database/repositories/orderRepo');
 const uiHelper = require('../../utils/uiHelper');
 const { isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
+const texts = require('../../utils/texts');
 const masterMenu = require('../keyboards/masterMenu');
 
 module.exports = (bot) => {
     bot.action('master_panel', isMasterAdmin, async (ctx) => {
         try {
-            const text = `Willkommen beim *Shop Bot*!\n\n👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
+            const role = await userRepo.getUserRole(ctx.from.id);
+            const text = texts.getWelcomeText(true, role);
             await uiHelper.updateOrSend(ctx, text, masterMenu());
         } catch (error) {
             console.error(error.message);
@@ -123,7 +125,7 @@ module.exports = (bot) => {
             });
         } catch (error) {
             console.error('Customer Overview Error:', error.message);
-            await ctx.answerCbQuery('⚠️ Fehler beim Laden der Statistik.', { show_alert: true });
+            await ctx.answerCbQuery(texts.getGeneralError().replace('❌ ', ''), { show_alert: true });
         }
     });
 
@@ -154,11 +156,12 @@ module.exports = (bot) => {
             const request = await approvalRepo.getApprovalById(approvalId);
             const product = await productRepo.getProductById(request.target_id);
 
-            let text = `⚖️ *Anfrage-Details*\n\n`;
-            text += `Typ: ${request.action_type}\n`;
-            text += `Produkt: ${product ? product.name : 'Unbekannt'}\n`;
-            if (request.new_value) text += `Neuer Wert: *${request.new_value}*\n`;
-            text += `Anfrage von: ${request.requested_by}\n`;
+            const text = texts.getApprovalRequestText({
+                type: request.action_type === 'DELETE' ? '🗑 LÖSCHUNG' : '💰 PREISÄNDERUNG',
+                requestedBy: request.requested_by,
+                productName: product ? product.name : 'Unbekannt',
+                newValue: request.new_value ? `${request.new_value}€` : null
+            });
 
             const keyboard = {
                 inline_keyboard: [
@@ -258,7 +261,7 @@ module.exports = (bot) => {
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
             await ctx.reply('Aktualisierte Admin-Liste:', { reply_markup: { inline_keyboard: keyboard } });
         } catch (error) {
-            ctx.reply('❌ Fehler beim Ernennen des Admins.');
+            ctx.reply(texts.getGeneralError());
         }
     });
 

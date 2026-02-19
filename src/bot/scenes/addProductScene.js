@@ -4,6 +4,7 @@ const { uploadToDezentral } = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
 const notificationService = require('../../services/notificationService');
 const config = require('../../config');
+const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -16,7 +17,7 @@ const cleanup = async (ctx) => {
 
 const cancelAndLeave = async (ctx) => {
     await cleanup(ctx);
-    const m = await ctx.reply('Vorgang abgebrochen.', { reply_markup: { remove_keyboard: true } });
+    const m = await ctx.reply(texts.getActionCanceled(), { reply_markup: { remove_keyboard: true } });
     setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, m.message_id).catch(() => {}), 2500);
     return ctx.scene.leave();
 };
@@ -45,10 +46,10 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
@@ -58,7 +59,7 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        ctx.wizard.state.productData.name = text;
+        ctx.wizard.state.productData.name = input;
         ctx.wizard.state.lastQuestion = 'Bitte sende die Beschreibung:';
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
@@ -75,10 +76,10 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
@@ -88,7 +89,7 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        ctx.wizard.state.productData.description = text;
+        ctx.wizard.state.productData.description = input;
         ctx.wizard.state.lastQuestion = 'Bitte sende den Preis in Euro (z.B. 10.50):';
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
@@ -105,10 +106,10 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
@@ -118,7 +119,7 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        const price = parseFloat(text.replace(',', '.'));
+        const price = parseFloat(input.replace(',', '.'));
         if (isNaN(price)) {
             const msg = await ctx.reply('⚠️ Ungültig. Bitte sende eine Zahl:');
             ctx.wizard.state.messagesToDelete.push(msg.message_id);
@@ -146,14 +147,14 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const text = ctx.message.text;
+        const input = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (text === '❌ Abbrechen') {
+        if (input === '❌ Abbrechen') {
             return cancelAndLeave(ctx);
         }
 
-        if (text.startsWith('/')) {
+        if (input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
@@ -167,7 +168,7 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        ctx.wizard.state.productData.isUnitPrice = text.toLowerCase() === 'ja';
+        ctx.wizard.state.productData.isUnitPrice = input.toLowerCase() === 'ja';
         ctx.wizard.state.lastQuestion = 'Bitte sende ein Foto oder tippe "Überspringen":';
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
@@ -189,13 +190,13 @@ const addProductScene = new Scenes.WizardScene(
         
         if (ctx.message) ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         
-        const text = ctx.message?.text;
+        const input = ctx.message?.text;
         
-        if (text === '❌ Abbrechen') {
+        if (input === '❌ Abbrechen') {
             return cancelAndLeave(ctx);
         }
 
-        if (text && text.startsWith('/')) {
+        if (input && input.startsWith('/')) {
             try { await ctx.deleteMessage(); } catch (e) {}
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
@@ -221,7 +222,7 @@ const addProductScene = new Scenes.WizardScene(
             } catch (error) {
                 console.error(error.message);
             }
-        } else if (text && text.toLowerCase() === 'überspringen') {
+        } else if (input && input.toLowerCase() === 'überspringen') {
             const removeMsg = await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
             ctx.wizard.state.messagesToDelete.push(removeMsg.message_id);
         }
@@ -259,7 +260,7 @@ const addProductScene = new Scenes.WizardScene(
         } catch (error) {
             console.error(error.message);
             await cleanup(ctx);
-            const err = await ctx.reply('❌ Fehler beim Speichern!', { reply_markup: { remove_keyboard: true } });
+            const err = await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
             setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, err.message_id).catch(() => {}), 3000);
         }
         

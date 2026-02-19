@@ -1,6 +1,7 @@
 const userRepo = require('../database/repositories/userRepo');
 const paymentRepo = require('../database/repositories/paymentRepo');
 const config = require('../config');
+const texts = require('../utils/texts');
 
 let bot;
 
@@ -24,17 +25,18 @@ const sendBroadcast = async (messageText, senderId) => {
                 });
                 successCount++;
             } catch (error) {
-                if (error.description.includes('forbidden') || error.description.includes('blocked') || error.description.includes('chat not found')) {
+                if (error.description && (error.description.includes('forbidden') || error.description.includes('blocked') || error.description.includes('chat not found'))) {
                     failedUsers.push(customer);
                 }
                 failCount++;
             }
         }
 
-        const report = `📢 *Broadcast Report*\n\n` +
-                       `✅ Erfolgreich: ${successCount}\n` +
-                       `❌ Fehlgeschlagen: ${failCount}\n\n` +
-                       `Gesendet von ID: ${senderId}`;
+        const report = texts.getBroadcastReport({
+            successCount,
+            failCount,
+            blockCount: failedUsers.length
+        }) + `\nGesendet von ID: ${senderId}`;
 
         const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
         const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
@@ -42,7 +44,7 @@ const sendBroadcast = async (messageText, senderId) => {
         for (const staff of uniqueStaff) {
             const keyboard = { inline_keyboard: [] };
             
-            if (failCount > 0 && Number(staff.telegram_id) === Number(config.MASTER_ADMIN_ID)) {
+            if (failedUsers.length > 0 && Number(staff.telegram_id) === Number(config.MASTER_ADMIN_ID)) {
                 keyboard.inline_keyboard.push([{ text: '🗑 Blockierte User bereinigen', callback_data: 'master_cleanup_blocked' }]);
             }
 
@@ -60,7 +62,7 @@ const sendBroadcast = async (messageText, senderId) => {
 
 const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId }) => {
     try {
-        let paymentMethodName = "Manuelle Abwicklung / Privat-Chat";
+        let paymentMethodName = "Manuelle Abwicklung";
         
         if (paymentId !== 'MANUAL') {
             try {
@@ -71,20 +73,15 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
             }
         }
 
-        const admins = await userRepo.getAllAdmins();
-        
-        let orderText = `🛍️ *Neue Bestellung*\n\n`;
-        orderText += `👤 Kunde: ${username} (ID: ${userId})\n`;
-        orderText += `💳 Zahlung: ${paymentMethodName}\n\n`;
-        orderText += `📦 Details:\n`;
-        
         let total = 0;
-        orderDetails.forEach((item) => {
-            orderText += `- ${item.quantity}x ${item.name} (${item.price}€) = ${item.total}€\n`;
-            total += parseFloat(item.total);
+        orderDetails.forEach(item => total += parseFloat(item.total));
+
+        const orderText = texts.getAdminNewOrderNotify({
+            username,
+            userId,
+            total: total.toFixed(2),
+            paymentName: paymentMethodName
         });
-        
-        orderText += `\n💰 *Gesamtsumme: ${total.toFixed(2)}€*`;
 
         const keyboard = {
             inline_keyboard: [
@@ -92,6 +89,7 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
             ]
         };
 
+        const admins = await userRepo.getAllAdmins();
         const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
         const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
 
@@ -113,14 +111,12 @@ const notifyMasterApproval = async ({ approvalId, actionType, productId, product
 
         const typeLabel = actionType === 'DELETE' ? '🗑 LÖSCHUNG' : '💰 PREISÄNDERUNG';
         
-        let text = `⚖️ *Neue Freigabeanfrage*\n\n`;
-        text += `Typ: *${typeLabel}*\n`;
-        text += `Produkt: ${productName}\n`;
-        text += `Von: ${requestedBy}\n`;
-        
-        if (newValue) {
-            text += `Neuer Wert: *${newValue}€*\n`;
-        }
+        const text = texts.getApprovalRequestText({
+            type: typeLabel,
+            requestedBy,
+            productName,
+            newValue: newValue ? `${newValue}€` : 'N/A'
+        });
 
         const keyboard = {
             inline_keyboard: [
@@ -146,7 +142,13 @@ const notifyMasterNewProduct = async ({ adminName, productName, categoryName, ti
         const masterId = config.MASTER_ADMIN_ID;
         if (!masterId) return;
 
-        const text = `ℹ️ *Neues Produkt angelegt*\n\nAdmin ${adminName} hat das Produkt *${productName}* in *${categoryName}* um ${time} Uhr erstellt.`;
+        const text = texts.getAdminNewProductNotify({
+            adminName,
+            productName,
+            categoryName,
+            time,
+            productId
+        });
 
         const keyboard = {
             inline_keyboard: [

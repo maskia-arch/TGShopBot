@@ -1,5 +1,6 @@
 const cartRepo = require('../../database/repositories/cartRepo');
 const uiHelper = require('../../utils/uiHelper');
+const texts = require('../../utils/texts');
 
 module.exports = (bot) => {
     bot.action('cart_view', async (ctx) => {
@@ -8,12 +9,12 @@ module.exports = (bot) => {
             const cartItems = await cartRepo.getCartDetails(userId);
             
             if (!cartItems || cartItems.length === 0) {
-                return uiHelper.updateOrSend(ctx, '🛒 *Dein Warenkorb ist aktuell leer.*', {
+                return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
                     inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
                 });
             }
 
-            let text = '🛒 *Dein Warenkorb*\n\n';
+            let text = texts.getCartContentHeader() + '\n\n';
             let total = 0;
             const keyboard = [];
 
@@ -53,7 +54,7 @@ module.exports = (bot) => {
         try {
             await cartRepo.clearCart(ctx.from.id);
             await ctx.answerCbQuery('Warenkorb geleert!');
-            await uiHelper.updateOrSend(ctx, '🛒 *Dein Warenkorb ist nun leer.*', {
+            await uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
                 inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
             });
         } catch (error) {
