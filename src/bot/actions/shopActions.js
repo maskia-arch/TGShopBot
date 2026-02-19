@@ -1,8 +1,14 @@
 const productRepo = require('../../database/repositories/productRepo');
 const cartRepo = require('../../database/repositories/cartRepo');
+const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
 const formatters = require('../../utils/formatters');
+const config = require('../../config');
 const { isAdmin } = require('../middlewares/auth');
+
+const masterMenu = require('../keyboards/masterMenu');
+const adminMenu = require('../keyboards/adminMenu');
+const customerMenu = require('../keyboards/customerMenu');
 
 module.exports = (bot) => {
     bot.action('shop_menu', async (ctx) => {
@@ -29,12 +35,13 @@ module.exports = (bot) => {
             });
 
             const isTestMode = ctx.callbackQuery.data.includes('admin') || 
-                               (ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
+                               (ctx.callbackQuery.message && ctx.callbackQuery.message.text && ctx.callbackQuery.message.text.includes('Admin'));
 
             if (userIsAdmin === true && isTestMode) {
                 keyboard.push([{ text: '🛠 Zurück zum Admin-Panel', callback_data: 'admin_panel' }]);
             } else {
                 keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);
+                keyboard.push([{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]);
             }
 
             const text = '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:';
@@ -131,5 +138,54 @@ module.exports = (bot) => {
 
     bot.action('noop', async (ctx) => {
         await ctx.answerCbQuery('Dieses Produkt ist momentan nicht auf Lager.', { show_alert: true });
+    });
+
+    bot.action('back_to_main', async (ctx) => {
+        try {
+            const userId = ctx.from.id;
+            const role = await userRepo.getUserRole(userId);
+            const isMaster = userId === Number(config.MASTER_ADMIN_ID);
+
+            let text = `Willkommen beim *Shop Bot*!\n\n`;
+            let keyboard;
+
+            if (isMaster) {
+                text += `👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
+                keyboard = masterMenu();
+            } else if (role === 'admin') {
+                text += `🛠 *Admin-Bereich*\n\nVerwalten Sie Produkte und Kategorien.`;
+                keyboard = adminMenu();
+            } else {
+                text += `Bitte wähle eine Option aus dem Menü:`;
+                keyboard = customerMenu();
+            }
+
+            await uiHelper.updateOrSend(ctx, text, keyboard);
+        } catch (error) {
+            console.error(error.message);
+        }
+    });
+
+    bot.action(/^(info|help|info_menu|help_menu)$/, async (ctx) => {
+        try {
+            const text = `ℹ️ *Hilfe & Informationen*\n\n` +
+                         `*Version:* ${config.VERSION}\n\n` +
+                         `🛍 *Wie kaufe ich hier ein?*\n\n` +
+                         `1️⃣ *Shop durchsuchen:* Wähle eine Kategorie und dann dein gewünschtes Produkt aus.\n` +
+                         `2️⃣ *In den Warenkorb:* Bestimme die Menge und lege das Produkt in den Warenkorb.\n` +
+                         `3️⃣ *Bestellung aufgeben:* Gehe zum Warenkorb, wähle eine Zahlungsart und schließe den Kauf ab.\n` +
+                         `4️⃣ *Warten:* Nach dem Absenden erhältst du eine Bestätigung. Wir kümmern uns umgehend um deine Bestellung!\n\n` +
+                         `Bei weiteren Fragen wende dich gerne direkt an den Support.`;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]
+                ]
+            };
+
+            await uiHelper.updateOrSend(ctx, text, keyboard);
+        } catch (error) {
+            console.error(error.message);
+        }
     });
 };
