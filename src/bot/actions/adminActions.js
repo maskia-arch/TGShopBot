@@ -83,6 +83,10 @@ module.exports = (bot) => {
             const keyboard = {
                 inline_keyboard: [
                     [{ text: '✏️ Namen ändern', callback_data: `admin_rename_cat_${categoryId}` }],
+                    [
+                        { text: '🔼 Hoch', callback_data: `admin_sort_cat_up_${categoryId}` },
+                        { text: '🔽 Runter', callback_data: `admin_sort_cat_down_${categoryId}` }
+                    ],
                     [{ text: '🗑 Kategorie löschen', callback_data: `admin_del_cat_${categoryId}` }],
                     [{ text: '🔙 Zurück', callback_data: 'admin_manage_categories' }]
                 ]
@@ -91,6 +95,35 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, `Kategorie bearbeiten: *${category.name}*`, keyboard);
         } catch (error) {
             console.error('Edit Cat Error:', error.message);
+        }
+    });
+
+    bot.action(/^admin_sort_cat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const direction = ctx.match[1];
+            const id = ctx.match[2];
+            const categories = await productRepo.getActiveCategories();
+            const index = categories.findIndex(c => c.id == id);
+            
+            if ((direction === 'up' && index > 0) || (direction === 'down' && index < categories.length - 1)) {
+                const swapIndex = direction === 'up' ? index - 1 : index + 1;
+                const promises = categories.map((cat, i) => {
+                    let newOrder = i;
+                    if (i === index) newOrder = swapIndex;
+                    else if (i === swapIndex) newOrder = index;
+                    return productRepo.updateCategorySortOrder(cat.id, newOrder);
+                });
+                await Promise.all(promises);
+                ctx.answerCbQuery('✅ Sortierung aktualisiert!').catch(() => {});
+            } else {
+                ctx.answerCbQuery('Nicht möglich.').catch(() => {});
+            }
+            
+            ctx.update.callback_query.data = `admin_edit_cat_${id}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) {
+            console.error('Sort Cat Error:', error.message);
+            ctx.answerCbQuery('Fehler beim Sortieren.').catch(() => {});
         }
     });
 
@@ -180,6 +213,10 @@ module.exports = (bot) => {
                 inline_keyboard: [
                     [{ text: stockLabel, callback_data: `admin_toggle_stock_${p.id}` }],
                     [{ text: visLabel, callback_data: `admin_toggle_vis_${p.id}` }],
+                    [
+                        { text: '🔼 Hoch', callback_data: `admin_sort_prod_up_${p.id}` },
+                        { text: '🔽 Runter', callback_data: `admin_sort_prod_down_${p.id}` }
+                    ],
                     [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${p.id}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${p.id}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${p.id}` }],
@@ -190,6 +227,36 @@ module.exports = (bot) => {
             await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${p.name}*`, keyboard, p.image_url);
         } catch (error) {
             console.error('Edit Prod Error:', error.message);
+        }
+    });
+
+    bot.action(/^admin_sort_prod_(up|down)_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const direction = ctx.match[1];
+            const id = ctx.match[2];
+            const product = await productRepo.getProductById(id);
+            const products = await productRepo.getProductsByCategory(product.category_id, true);
+            const index = products.findIndex(p => p.id == id);
+            
+            if ((direction === 'up' && index > 0) || (direction === 'down' && index < products.length - 1)) {
+                const swapIndex = direction === 'up' ? index - 1 : index + 1;
+                const promises = products.map((prod, i) => {
+                    let newOrder = i;
+                    if (i === index) newOrder = swapIndex;
+                    else if (i === swapIndex) newOrder = index;
+                    return productRepo.updateProductSortOrder(prod.id, newOrder);
+                });
+                await Promise.all(promises);
+                ctx.answerCbQuery('✅ Sortierung aktualisiert!').catch(() => {});
+            } else {
+                ctx.answerCbQuery('Nicht möglich.').catch(() => {});
+            }
+            
+            ctx.update.callback_query.data = `admin_edit_prod_${id}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) {
+            console.error('Sort Prod Error:', error.message);
+            ctx.answerCbQuery('Fehler beim Sortieren.').catch(() => {});
         }
     });
 
@@ -211,6 +278,10 @@ module.exports = (bot) => {
                 inline_keyboard: [
                     [{ text: stockLabel, callback_data: `admin_toggle_stock_${productId}` }],
                     [{ text: visLabel, callback_data: `admin_toggle_vis_${productId}` }],
+                    [
+                        { text: '🔼 Hoch', callback_data: `admin_sort_prod_up_${productId}` },
+                        { text: '🔽 Runter', callback_data: `admin_sort_prod_down_${productId}` }
+                    ],
                     [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${productId}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${productId}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${productId}` }],

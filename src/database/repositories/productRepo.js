@@ -1,11 +1,11 @@
 const supabase = require('../supabaseClient');
 
 const getActiveCategories = async () => {
-    // Nur ID und Namen laden, um die Payload klein zu halten
     const { data, error } = await supabase
         .from('categories')
-        .select('id, name')
+        .select('id, name, sort_order')
         .eq('is_active', true)
+        .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
     if (error) throw error;
     return data;
@@ -14,7 +14,7 @@ const getActiveCategories = async () => {
 const addCategory = async (name) => {
     const { data, error } = await supabase
         .from('categories')
-        .insert([{ name }])
+        .insert([{ name, sort_order: 0 }])
         .select('id, name');
     if (error) throw error;
     return data[0];
@@ -31,8 +31,6 @@ const renameCategory = async (id, newName) => {
 };
 
 const deleteCategory = async (id) => {
-    // Parallelisierung: Produkte auf "kategorielos" setzen und Kategorie löschen geht hier nicht (Foreign Key),
-    // aber wir optimieren den Ablauf.
     const { error: updateError } = await supabase
         .from('products')
         .update({ category_id: null })
@@ -49,12 +47,20 @@ const deleteCategory = async (id) => {
     return true;
 };
 
+const updateCategorySortOrder = async (id, sortOrder) => {
+    const { data, error } = await supabase
+        .from('categories')
+        .update({ sort_order: sortOrder })
+        .eq('id', id)
+        .select('id');
+    if (error) throw error;
+    return data[0];
+};
+
 const getProductsByCategory = async (categoryId, isAdmin = false) => {
-    // WICHTIG: In der Listenansicht laden wir KEINE Beschreibungen oder Bild-URLs.
-    // Das spart massiv Bandbreite und Rechenzeit bei der UI-Generierung.
     let query = supabase
         .from('products')
-        .select('id, name, price, is_active, is_out_of_stock, category_id');
+        .select('id, name, price, is_active, is_out_of_stock, category_id, sort_order');
     
     if (categoryId === null || categoryId === 'none') {
         query = query.is('category_id', null);
@@ -66,7 +72,9 @@ const getProductsByCategory = async (categoryId, isAdmin = false) => {
         query = query.eq('is_active', true);
     }
 
-    const { data, error } = await query.order('name', { ascending: true });
+    const { data, error } = await query
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
     if (error) throw error;
     return data;
 };
@@ -101,8 +109,17 @@ const updateProductImage = async (productId, imageUrl) => {
     return data[0];
 };
 
+const updateProductSortOrder = async (id, sortOrder) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ sort_order: sortOrder })
+        .eq('id', id)
+        .select('id');
+    if (error) throw error;
+    return data[0];
+};
+
 const getProductById = async (productId) => {
-    // Hier laden wir alles (*), da diese Funktion für die Detailansicht genutzt wird.
     const { data, error } = await supabase
         .from('products')
         .select('*')
@@ -124,11 +141,21 @@ const addProduct = async (productData) => {
             is_unit_price: isUnitPrice,
             image_url: imageUrl,
             is_active: true,
-            is_out_of_stock: false
+            is_out_of_stock: false,
+            sort_order: 0
         }])
         .select('id');
     if (error) throw error;
     return data;
+};
+
+const deleteProduct = async (id) => {
+    const { error } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', id);
+    if (error) throw error;
+    return true;
 };
 
 module.exports = {
@@ -136,10 +163,13 @@ module.exports = {
     addCategory,
     renameCategory,
     deleteCategory,
+    updateCategorySortOrder,
     getProductsByCategory,
     getProductById,
     addProduct,
+    deleteProduct,
     toggleProductStatus,
     updateProductCategory,
-    updateProductImage
+    updateProductImage,
+    updateProductSortOrder
 };
