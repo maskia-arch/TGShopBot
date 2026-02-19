@@ -7,6 +7,8 @@ const config = require('../../config');
 module.exports = (bot) => {
     bot.command('start', async (ctx) => {
         try {
+            if (!ctx.session) ctx.session = {};
+
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
 
@@ -29,10 +31,23 @@ module.exports = (bot) => {
                 keyboard = customerMenu();
             }
 
-            await ctx.reply(text, { 
+            const sentMessage = await ctx.reply(text, { 
                 reply_markup: keyboard,
                 parse_mode: 'Markdown' 
             });
+
+            try {
+                await ctx.deleteMessage();
+            } catch (e) {}
+
+            if (ctx.session.lastMenuMessageId) {
+                try {
+                    await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.lastMenuMessageId);
+                } catch (e) {}
+            }
+
+            ctx.session.lastMenuMessageId = sentMessage.message_id;
+
         } catch (error) {
             console.error('Start Command Error:', error.message);
         }

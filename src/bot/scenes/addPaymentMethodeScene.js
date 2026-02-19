@@ -2,47 +2,120 @@ const { Scenes } = require('telegraf');
 const paymentRepo = require('../../database/repositories/paymentRepo');
 const uiHelper = require('../../utils/uiHelper');
 
+const cleanup = async (ctx) => {
+    if (ctx.wizard.state.messagesToDelete) {
+        for (const msgId of ctx.wizard.state.messagesToDelete) {
+            await ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+        }
+        ctx.wizard.state.messagesToDelete = [];
+    }
+};
+
 const addPaymentMethodScene = new Scenes.WizardScene(
     'addPaymentMethodScene',
-    // Schritt 1: Name der Zahlungsart
     async (ctx) => {
         ctx.wizard.state.data = {};
-        await ctx.reply('💳 *Neue Zahlungsart*\n\nWie soll die Zahlungsart heißen? (z.B. Bitcoin, PayPal, Barzahlung)', {
+        ctx.wizard.state.messagesToDelete = [];
+        ctx.wizard.state.lastQuestion = '💳 *Neue Zahlungsart*\n\nWie soll die Zahlungsart heißen? (z.B. Bitcoin, PayPal, Barzahlung)';
+
+        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel' }]] }
+            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]] }
         });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
+        
         return ctx.wizard.next();
     },
-    // Schritt 2: Adresse (Optional)
     async (ctx) => {
-        if (ctx.callbackQuery?.data === 'cancel') return ctx.scene.leave();
-        if (!ctx.message?.text) return;
+        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
+            await ctx.answerCbQuery('Abgebrochen');
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+            return ctx.scene.leave();
+        }
 
-        ctx.wizard.state.data.name = ctx.message.text;
-        await ctx.reply(`Alles klar: *${ctx.message.text}*.\n\nBitte sende mir jetzt die **Zahlungsadresse** (Wallet-ID, E-Mail oder Instruktion).\n\nFalls keine Adresse nötig ist (z.B. bei Barzahlung), klicke auf "Überspringen".`, {
+        if (!ctx.message || !ctx.message.text) return;
+
+        const text = ctx.message.text;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+
+        if (text.startsWith('/')) {
+            try { await ctx.deleteMessage(); } catch (e) {}
+            
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Zahlungsart anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
+            });
+            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
+            
+            return;
+        }
+
+        ctx.wizard.state.data.name = text;
+        ctx.wizard.state.lastQuestion = `Alles klar: *${text}*.\n\nBitte sende mir jetzt die **Zahlungsadresse** (Wallet-ID, E-Mail oder Instruktion).\n\nFalls keine Adresse nötig ist (z.B. bei Barzahlung), klicke auf "Überspringen".`;
+
+        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
                     [{ text: '⏭ Überspringen', callback_data: 'skip_address' }],
-                    [{ text: '❌ Abbrechen', callback_data: 'cancel' }]
+                    [{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]
                 ]
             }
         });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
+        
         return ctx.wizard.next();
     },
-    // Schritt 3: Speichern
     async (ctx) => {
-        if (ctx.callbackQuery?.data === 'cancel') return ctx.scene.leave();
-        
-        const address = ctx.callbackQuery?.data === 'skip_address' ? null : ctx.message?.text;
+        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
+            await ctx.answerCbQuery('Abgebrochen');
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+            return ctx.scene.leave();
+        }
+
+        let address = null;
+
+        if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_address') {
+            await ctx.answerCbQuery('Übersprungen');
+        } else {
+            if (!ctx.message || !ctx.message.text) return;
+            
+            const text = ctx.message.text;
+            ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+
+            if (text.startsWith('/')) {
+                try { await ctx.deleteMessage(); } catch (e) {}
+                
+                const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Zahlungsart anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '⏭ Überspringen', callback_data: 'skip_address' }],
+                            [{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]
+                        ]
+                    }
+                });
+                ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
+                
+                return;
+            }
+            address = text;
+        }
+
         const name = ctx.wizard.state.data.name;
 
         try {
             await paymentRepo.addPaymentMethod(name, address);
-            await ctx.reply(`✅ Zahlungsart gespeichert:\n\n*Name:* ${name}\n*Adresse:* ${address || 'Keine'}\n\nDiese wird Kunden nun beim Checkout angezeigt.`, { parse_mode: 'Markdown' });
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, `✅ Zahlungsart gespeichert:\n\n*Name:* ${name}\n*Adresse:* ${address || 'Keine'}\n\nDiese wird Kunden nun beim Checkout angezeigt.`, 6);
         } catch (error) {
-            await ctx.reply('❌ Fehler beim Speichern.');
+            console.error(error.message);
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, '❌ Fehler beim Speichern.', 3);
         }
+        
         return ctx.scene.leave();
     }
 );

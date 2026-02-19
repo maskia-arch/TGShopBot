@@ -2,18 +2,28 @@ const { Scenes } = require('telegraf');
 const notificationService = require('../../services/notificationService');
 const uiHelper = require('../../utils/uiHelper');
 
-/**
- * Szene für den Versand von Rundnachrichten (Broadcast)
- * Führt den Admin durch Erstellung, Vorschau und Versand.
- */
+const cleanup = async (ctx) => {
+    if (ctx.wizard.state.messagesToDelete) {
+        for (const msgId of ctx.wizard.state.messagesToDelete) {
+            await ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+        }
+        ctx.wizard.state.messagesToDelete = [];
+    }
+};
+
+const cancelAndLeave = async (ctx) => {
+    await cleanup(ctx);
+    await uiHelper.sendTemporary(ctx, 'Broadcast abgebrochen.', 2);
+    return ctx.scene.leave();
+};
+
 const broadcastScene = new Scenes.WizardScene(
     'broadcastScene',
-    // Schritt 1: Text abfragen
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
-        const text = '📢 *Broadcast-Modus*\n\nBitte sende mir jetzt den Text für die Push-Nachricht.\n\n_Hinweis: Markdown wird unterstützt. Der Versand erfolgt an alle registrierten Kunden._';
+        ctx.wizard.state.lastQuestion = '📢 *Broadcast-Modus*\n\nBitte sende mir jetzt den Text für die Push-Nachricht.\n\n_Hinweis: Markdown wird unterstützt. Der Versand erfolgt an alle registrierten Kunden._';
         
-        const msg = await ctx.reply(text, {
+        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_broadcast' }]]
@@ -23,25 +33,33 @@ const broadcastScene = new Scenes.WizardScene(
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
-    // Schritt 2: Vorschau und Bestätigung
     async (ctx) => {
-        // Abbruch über Button
-        if (ctx.callbackQuery?.data === 'cancel_broadcast') {
+        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_broadcast') {
             await ctx.answerCbQuery('Broadcast abgebrochen');
-            return ctx.scene.leave();
+            return cancelAndLeave(ctx);
         }
 
-        // Validierung: Nur Textnachrichten erlauben
-        if (!ctx.message || !ctx.message.text) {
-            const warning = await ctx.reply('⚠️ Bitte sende einen gültigen Text.');
-            ctx.wizard.state.messagesToDelete.push(warning.message_id);
+        if (!ctx.message || !ctx.message.text) return;
+
+        const text = ctx.message.text;
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+
+        if (text.startsWith('/')) {
+            try { await ctx.deleteMessage(); } catch (e) {}
+            
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Broadcast zu erstellen.\n\n${ctx.wizard.state.lastQuestion}`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_broadcast' }]]
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
             return;
         }
 
-        ctx.wizard.state.broadcastText = ctx.message.text;
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        const previewText = `📝 *Vorschau deiner Nachricht:*\n\n---\n${ctx.message.text}\n---\n\n*Möchtest du diese Nachricht jetzt an alle Kunden senden?*`;
+        ctx.wizard.state.broadcastText = text;
+        const previewText = `📝 *Vorschau deiner Nachricht:*\n\n---\n${text}\n---\n\n*Möchtest du diese Nachricht jetzt an alle Kunden senden?*`;
+        ctx.wizard.state.lastQuestion = previewText;
 
         const msg = await ctx.reply(previewText, {
             parse_mode: 'Markdown',
@@ -57,33 +75,61 @@ const broadcastScene = new Scenes.WizardScene(
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
-    // Schritt 3: Versand ausführen
     async (ctx) => {
         const action = ctx.callbackQuery?.data;
 
+        if (action === 'cancel_broadcast') {
+            await ctx.answerCbQuery('Abgebrochen');
+            return cancelAndLeave(ctx);
+        }
+
         if (action === 'retry_broadcast') {
-            // Zurück zum ersten Schritt (Textabfrage)
             await ctx.answerCbQuery('Eingabe wiederholen');
-            return ctx.wizard.selectStep(0);
+            await cleanup(ctx);
+            
+            ctx.wizard.state.messagesToDelete = [];
+            ctx.wizard.state.lastQuestion = '📢 *Broadcast-Modus*\n\nBitte sende mir jetzt den *neuen Text* für die Push-Nachricht:';
+            
+            const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_broadcast' }]]
+                }
+            });
+            
+            ctx.wizard.state.messagesToDelete.push(msg.message_id);
+            return ctx.wizard.selectStep(1);
         }
 
         if (action === 'confirm_send') {
             await ctx.answerCbQuery('Versand gestartet...');
-            
-            // Aufruf des Notification Services
             await notificationService.sendBroadcast(ctx.wizard.state.broadcastText, ctx.from.id);
-            
-            await uiHelper.sendTemporary(ctx, 'Broadcast wurde erfolgreich versendet! Den Report findest du in deinen privaten Nachrichten.', 5);
-        } else {
-            await ctx.answerCbQuery('Vorgang beendet');
+            await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, '✅ Broadcast wurde erfolgreich versendet! Den Report findest du in deinen privaten Nachrichten.', 5);
+            return ctx.scene.leave();
         }
 
-        // Automatischer Cleanup der Wizard-Nachrichten für Chat-Hygiene
-        for (const id of ctx.wizard.state.messagesToDelete) {
-            ctx.telegram.deleteMessage(ctx.chat.id, id).catch(() => {});
+        if (ctx.message && ctx.message.text) {
+            ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+            const text = ctx.message.text;
+            
+            if (text.startsWith('/')) {
+                try { await ctx.deleteMessage(); } catch (e) {}
+            }
+            
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte nutze die Buttons unter der Vorschau.\n\n${ctx.wizard.state.lastQuestion}`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '🚀 Jetzt senden', callback_data: 'confirm_send' }],
+                        [{ text: '✏️ Korrigieren', callback_data: 'retry_broadcast' }],
+                        [{ text: '❌ Abbrechen', callback_data: 'cancel_broadcast' }]
+                    ]
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
+            return;
         }
-        
-        return ctx.scene.leave();
     }
 );
 

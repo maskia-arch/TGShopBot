@@ -7,48 +7,74 @@ const notificationService = require('../../services/notificationService');
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
         for (const msgId of ctx.wizard.state.messagesToDelete) {
-            ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
+            await ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
         }
+        ctx.wizard.state.messagesToDelete = [];
     }
+};
+
+const cancelAndLeave = async (ctx) => {
+    await cleanup(ctx);
+    await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
+    return ctx.scene.leave();
 };
 
 const editPriceScene = new Scenes.WizardScene(
     'editPriceScene',
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
-        const productId = ctx.wizard.state.productId;
+        const productId = ctx.wizard.state.productId || ctx.scene.state.productId;
         const product = await productRepo.getProductById(productId);
         
+        ctx.wizard.state.productId = productId;
         ctx.wizard.state.productName = product.name;
         
-        const msg = await ctx.reply(
-            `💰 *Preisänderung*\nProdukt: "${product.name}"\nAktuell: ${product.price}€\n\nBitte sende mir den neuen Preis:`, 
-            {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
-                }
+        ctx.wizard.state.lastQuestion = `💰 *Preisänderung*\nProdukt: "${product.name}"\nAktuell: ${product.price}€\n\nBitte sende mir den neuen Preis:`;
+        
+        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
             }
-        );
+        });
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
+        
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
-            await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, 'Vorgang abgebrochen.', 2);
-            return ctx.scene.leave();
+            return cancelAndLeave(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
+        
+        const text = ctx.message.text;
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        const input = ctx.message.text.replace(',', '.');
+        if (text.startsWith('/')) {
+            try { await ctx.deleteMessage(); } catch (e) {}
+            
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Preis zu ändern.\n\n${ctx.wizard.state.lastQuestion}`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]]
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
+            return;
+        }
+
+        const input = text.replace(',', '.');
         const newPrice = parseFloat(input);
 
         if (isNaN(newPrice) || newPrice <= 0) {
-            const errorMsg = await ctx.reply('⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):');
+            ctx.wizard.state.lastQuestion = '⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):';
+            const errorMsg = await ctx.reply(ctx.wizard.state.lastQuestion, {
+                reply_markup: {
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                }
+            });
             ctx.wizard.state.messagesToDelete.push(errorMsg.message_id);
             return;
         }
@@ -78,19 +104,14 @@ const editPriceScene = new Scenes.WizardScene(
             }
 
             await cleanup(ctx);
+            await uiHelper.sendTemporary(ctx, `Anfrage für ${ctx.wizard.state.productName} (${formattedPrice}€) gesendet!`, 5);
             
-            await uiHelper.sendTemporary(
-                ctx, 
-                `Anfrage für ${ctx.wizard.state.productName} (${formattedPrice}€) gesendet!`, 
-                5
-            );
-            
-            await ctx.answerCbQuery('✅ Anfrage an Master gesendet');
         } catch (error) {
             console.error(error.message);
             await cleanup(ctx);
             await uiHelper.sendTemporary(ctx, '❌ Fehler beim Senden der Anfrage.', 3);
         }
+        
         return ctx.scene.leave();
     }
 );
