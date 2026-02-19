@@ -11,22 +11,19 @@ module.exports = (bot) => {
             if (!ctx.session) ctx.session = {};
 
             const userId = ctx.from.id;
-            const username = ctx.from.username || ctx.from.first_name;
-
-            await userRepo.upsertUser(userId, username);
-
-            const role = await userRepo.getUserRole(userId);
+            const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
+            await userRepo.upsertUser(userId, username);
+            const role = await userRepo.getUserRole(userId);
+
             const text = texts.getWelcomeText(isMaster, role);
-            let keyboard;
+            let keyboard = customerMenu();
 
             if (isMaster) {
                 keyboard = masterMenu();
             } else if (role === 'admin') {
                 keyboard = adminMenu();
-            } else {
-                keyboard = customerMenu();
             }
 
             const sentMessage = await ctx.reply(text, { 
@@ -34,14 +31,10 @@ module.exports = (bot) => {
                 parse_mode: 'Markdown' 
             });
 
-            try {
-                await ctx.deleteMessage();
-            } catch (e) {}
+            ctx.deleteMessage().catch(() => {});
 
             if (ctx.session.lastMenuMessageId) {
-                try {
-                    await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.lastMenuMessageId);
-                } catch (e) {}
+                ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.lastMenuMessageId).catch(() => {});
             }
 
             ctx.session.lastMenuMessageId = sentMessage.message_id;

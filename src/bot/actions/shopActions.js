@@ -12,13 +12,11 @@ const customerMenu = require('../keyboards/customerMenu');
 
 module.exports = (bot) => {
     bot.action('shop_menu', async (ctx) => {
-        // Sofort antworten, um die Sanduhr bei Telegram zu entfernen
         ctx.answerCbQuery().catch(() => {});
 
         try {
             const userId = ctx.from.id;
             
-            // Datenbankabfragen parallel starten für mehr Speed
             const [allCategories, role, noneProducts] = await Promise.all([
                 productRepo.getActiveCategories(),
                 userRepo.getUserRole(userId),
@@ -27,36 +25,25 @@ module.exports = (bot) => {
 
             const keyboard = [];
 
-            // Kategorien parallel prüfen, ob sie aktive Produkte enthalten
             const categoryChecks = await Promise.all(allCategories.map(async (cat) => {
                 const products = await productRepo.getProductsByCategory(cat.id);
-                const hasActive = products.some(p => p.is_active);
-                return hasActive ? cat : null;
+                return products.some(p => p.is_active) ? cat : null;
             }));
 
             categoryChecks.forEach(cat => {
                 if (cat) keyboard.push([{ text: cat.name, callback_data: `category_${cat.id}` }]);
             });
 
-            const activeNoneProducts = noneProducts.filter(p => p.is_active);
-            if (activeNoneProducts.length > 0) {
+            if (noneProducts.some(p => p.is_active)) {
                 keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
             }
 
-            const userIsAdmin = (role === 'admin' || userId === Number(config.MASTER_ADMIN_ID));
-            const fromAdminContext = ctx.callbackQuery.data.includes('admin');
-
-            if (userIsAdmin && fromAdminContext) {
-                keyboard.push([{ text: '🛠 Zurück zum Admin-Panel', callback_data: 'admin_panel' }]);
-            } else {
-                keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);
-                keyboard.push([{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]);
-            }
+            keyboard.push([{ text: '🛒 Warenkorb', callback_data: 'cart_view' }]);
+            keyboard.push([{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]);
 
             await uiHelper.updateOrSend(ctx, '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:', { inline_keyboard: keyboard });
-
         } catch (error) {
-            console.error('Speed-Shop Error:', error.message);
+            console.error(error.message);
         }
     });
 
@@ -65,7 +52,6 @@ module.exports = (bot) => {
         try {
             const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
             
-            // Parallel laden: Produkte und Warenkorb
             const [allProducts, cart] = await Promise.all([
                 productRepo.getProductsByCategory(categoryId),
                 cartRepo.getCart(ctx.from.id)
@@ -141,8 +127,7 @@ module.exports = (bot) => {
             await cartRepo.addToCart(ctx.from.id, productId, 1, username);
             
             ctx.answerCbQuery('Hinzugefügt!').catch(() => {});
-            await uiHelper.sendTemporary(ctx, texts.getAddToCartSuccess(product.name), 3);
-
+            
             ctx.match = [null, productId];
             bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: `product_${productId}` } });
         } catch (error) {

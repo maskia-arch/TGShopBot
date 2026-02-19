@@ -31,24 +31,22 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
-            return ctx.scene.leave();
+            await ctx.scene.leave();
+            ctx.update.callback_query.data = 'master_manage_payments';
+            return;
         }
 
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Zahlungsart anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte sende erst den Namen oder klicke auf Abbrechen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]] }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            
             return;
         }
 
@@ -72,8 +70,9 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
-            return ctx.scene.leave();
+            await ctx.scene.leave();
+            ctx.update.callback_query.data = 'master_manage_payments';
+            return;
         }
 
         let address = null;
@@ -83,23 +82,20 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         } else {
             if (!ctx.message || !ctx.message.text) return;
             
-            const input = ctx.message.text;
+            const input = ctx.message.text.trim();
             ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
             if (input.startsWith('/')) {
-                try { await ctx.deleteMessage(); } catch (e) {}
-                
-                const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine Zahlungsart anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+                const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte sende die Adresse oder klicke auf "Überspringen".\n\n${ctx.wizard.state.lastQuestion}`, {
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [
                             [{ text: '⏭ Überspringen', callback_data: 'skip_address' }],
-                            [{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]
+                            [{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]
                         ]
                     }
                 });
                 ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-                
                 return;
             }
             address = input;
@@ -110,15 +106,29 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         try {
             await paymentRepo.addPaymentMethod(name, address);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, `✅ Zahlungsart gespeichert:\n\n*Name:* ${name}\n*Adresse:* ${address || 'Keine'}\n\nDiese wird Kunden nun beim Checkout angezeigt.`, 6);
+            
+            await ctx.reply(texts.getPaymentSaved(name, address), { parse_mode: 'Markdown' });
+
+            ctx.update.callback_query = { data: 'master_manage_payments', from: ctx.from };
+            return ctx.scene.leave();
         } catch (error) {
-            console.error(error.message);
+            console.error('AddPayment Error:', error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
+            await ctx.reply(texts.getGeneralError());
+            return ctx.scene.leave();
         }
-        
-        return ctx.scene.leave();
     }
 );
+
+addPaymentMethodScene.action('cancel_scene', async (ctx) => {
+    await ctx.answerCbQuery('Abgebrochen');
+    await cleanup(ctx);
+    await ctx.scene.leave();
+    ctx.update.callback_query = { data: 'master_manage_payments', from: ctx.from };
+});
+
+addPaymentMethodScene.action('skip_address', async (ctx) => {
+    return ctx.wizard.steps[ctx.wizard.cursor](ctx);
+});
 
 module.exports = addPaymentMethodScene;

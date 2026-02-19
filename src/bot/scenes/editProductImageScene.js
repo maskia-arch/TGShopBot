@@ -12,12 +12,10 @@ const cleanup = async (ctx) => {
     }
 };
 
-const cancelAndLeave = async (ctx) => {
+const backToProduct = async (ctx) => {
     await cleanup(ctx);
-    const cancelMsg = await ctx.reply(texts.getActionCanceled(), { reply_markup: { remove_keyboard: true } });
-    setTimeout(() => {
-        ctx.telegram.deleteMessage(ctx.chat.id, cancelMsg.message_id).catch(() => {});
-    }, 3000);
+    const productId = ctx.wizard.state.productId;
+    ctx.update.callback_query = { data: `admin_edit_prod_${productId}`, from: ctx.from };
     return ctx.scene.leave();
 };
 
@@ -26,7 +24,7 @@ const editProductImageScene = new Scenes.WizardScene(
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productId = ctx.scene.state.productId;
-        ctx.wizard.state.lastQuestion = '🖼 *Bild ändern*\nBitte sende ein neues Foto oder einen direkten Bild-Link.\nTippe "Löschen", um das Bild zu entfernen.';
+        ctx.wizard.state.lastQuestion = '🖼 *Bild ändern*\n\nBitte sende ein neues Foto.\nTippe "Löschen", um das Bild zu entfernen oder "Abbrechen".';
 
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -45,16 +43,14 @@ const editProductImageScene = new Scenes.WizardScene(
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         const productId = ctx.wizard.state.productId;
-        const input = ctx.message.text;
+        const input = ctx.message.text?.trim();
 
         if (input && input.toLowerCase() === 'abbrechen') {
-            return cancelAndLeave(ctx);
+            return backToProduct(ctx);
         }
 
         if (input && input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produktbild zu ändern.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Löschen' }, { text: 'Abbrechen' }]],
@@ -76,30 +72,31 @@ const editProductImageScene = new Scenes.WizardScene(
                 ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
                 finalImageUrl = await uploadToDezentral(fileLink.href);
             } catch (error) {
+                console.error('Upload Error:', error.message);
                 finalImageUrl = null;
             }
         } else if (input && input.toLowerCase() === 'löschen') {
             finalImageUrl = null;
         } else if (input && input.startsWith('http')) {
-            finalImageUrl = input.trim();
+            finalImageUrl = input;
         }
 
-        if (finalImageUrl !== undefined) {
-            await productRepo.updateProductImage(productId, finalImageUrl);
+        try {
+            if (finalImageUrl !== undefined) {
+                await productRepo.updateProductImage(productId, finalImageUrl);
+                await cleanup(ctx);
+                await ctx.reply('✅ Bild erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
+            } else {
+                await cleanup(ctx);
+                await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
+            }
+            return backToProduct(ctx);
+        } catch (error) {
+            console.error('DB Update Error:', error.message);
             await cleanup(ctx);
-            const successMsg = await ctx.reply('✅ Bild erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
-            setTimeout(() => {
-                ctx.telegram.deleteMessage(ctx.chat.id, successMsg.message_id).catch(() => {});
-            }, 3000);
-        } else {
-            await cleanup(ctx);
-            const errorMsg = await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
-            setTimeout(() => {
-                ctx.telegram.deleteMessage(ctx.chat.id, errorMsg.message_id).catch(() => {});
-            }, 3000);
+            await ctx.reply(texts.getGeneralError());
+            return ctx.scene.leave();
         }
-
-        return ctx.scene.leave();
     }
 );
 

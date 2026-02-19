@@ -12,9 +12,9 @@ const cleanup = async (ctx) => {
     }
 };
 
-const cancelAndLeave = async (ctx) => {
+const backToAdmin = async (ctx) => {
     await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+    ctx.update.callback_query = { data: 'admin_panel', from: ctx.from };
     return ctx.scene.leave();
 };
 
@@ -36,22 +36,20 @@ const broadcastScene = new Scenes.WizardScene(
     },
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_broadcast') {
-            await ctx.answerCbQuery('Broadcast abgebrochen');
-            return cancelAndLeave(ctx);
+            await ctx.answerCbQuery('Abgebrochen');
+            return backToAdmin(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Broadcast zu erstellen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_broadcast' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_broadcast' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
@@ -81,23 +79,19 @@ const broadcastScene = new Scenes.WizardScene(
 
         if (action === 'cancel_broadcast') {
             await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
+            return backToAdmin(ctx);
         }
 
         if (action === 'retry_broadcast') {
-            await ctx.answerCbQuery('Eingabe wiederholen');
+            await ctx.answerCbQuery('Eingabe korrigieren');
             await cleanup(ctx);
-            
-            ctx.wizard.state.messagesToDelete = [];
-            ctx.wizard.state.lastQuestion = '📢 *Broadcast-Modus*\n\nBitte sende mir jetzt den *neuen Text* für die Push-Nachricht:';
-            
+            ctx.wizard.state.lastQuestion = '📢 *Korrektur*\nBitte sende jetzt den neuen Text:';
             const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_broadcast' }]]
                 }
             });
-            
             ctx.wizard.state.messagesToDelete.push(msg.message_id);
             return ctx.wizard.selectStep(1);
         }
@@ -106,19 +100,13 @@ const broadcastScene = new Scenes.WizardScene(
             await ctx.answerCbQuery('Versand gestartet...');
             await notificationService.sendBroadcast(ctx.wizard.state.broadcastText, ctx.from.id);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, '✅ Broadcast wurde erfolgreich versendet! Den Report findest du in deinen privaten Nachrichten.', 5);
-            return ctx.scene.leave();
+            await uiHelper.sendTemporary(ctx, '✅ Broadcast wurde versendet!', 3);
+            return backToAdmin(ctx);
         }
 
         if (ctx.message && ctx.message.text) {
             ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-            const input = ctx.message.text;
-            
-            if (input.startsWith('/')) {
-                try { await ctx.deleteMessage(); } catch (e) {}
-            }
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte nutze die Buttons unter der Vorschau.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Warte auf Bestätigung*\nBitte nutze die Buttons unter der Vorschau.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
@@ -129,7 +117,6 @@ const broadcastScene = new Scenes.WizardScene(
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
         }
     }
 );

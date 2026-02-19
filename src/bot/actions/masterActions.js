@@ -11,7 +11,7 @@ const masterMenu = require('../keyboards/masterMenu');
 
 module.exports = (bot) => {
     bot.action('master_panel', isMasterAdmin, async (ctx) => {
-        ctx.answerCbQuery().catch(() => {}); // Sofort quittieren
+        ctx.answerCbQuery().catch(() => {});
         try {
             const role = await userRepo.getUserRole(ctx.from.id);
             const text = texts.getWelcomeText(true, role);
@@ -85,7 +85,7 @@ module.exports = (bot) => {
             }]));
 
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
-            await uiHelper.updateOrSend(ctx, '⚠️ *Datenpflege*\nKlicke auf einen User, um dessen Datensatz (z.B. nach Blockierung) endgültig zu löschen:', { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '⚠️ *Datenpflege*\nKlicke auf einen User, um dessen Datensatz endgültig zu löschen:', { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
         }
@@ -129,7 +129,7 @@ module.exports = (bot) => {
                 inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
             });
         } catch (error) {
-            console.error('Customer Overview Error:', error.message);
+            console.error(error.message);
             ctx.answerCbQuery(texts.getGeneralError().replace('❌ ', ''), { show_alert: true }).catch(() => {});
         }
     });
@@ -191,13 +191,15 @@ module.exports = (bot) => {
             const approvalId = ctx.match[1];
             const request = await approvalRepo.getApprovalById(approvalId);
 
+            const tasks = [approvalRepo.updateApprovalStatus(approvalId, 'approved')];
+
             if (request.action_type === 'PRICE_CHANGE') {
-                await productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value));
+                tasks.push(productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value)));
             } else if (request.action_type === 'DELETE') {
-                await productRepo.deleteProduct(request.target_id);
+                tasks.push(productRepo.deleteProduct(request.target_id));
             }
 
-            await approvalRepo.updateApprovalStatus(approvalId, 'approved');
+            await Promise.all(tasks);
             ctx.answerCbQuery('✅ Anfrage genehmigt!').catch(() => {});
             
             await uiHelper.updateOrSend(ctx, '✅ Die Änderung wurde erfolgreich im System übernommen.', {
@@ -223,6 +225,8 @@ module.exports = (bot) => {
 
     bot.action('master_manage_admins', isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
+        if (ctx.session) ctx.session.awaitingAdminId = false;
+        
         try {
             const admins = await userRepo.getAllAdmins();
             const keyboard = admins
@@ -247,6 +251,41 @@ module.exports = (bot) => {
         await uiHelper.updateOrSend(ctx, '🆔 *Admin ernennen*\n\nBitte sende mir jetzt die **Telegram ID** des Nutzers, den du zum Admin machen möchtest.\n(Oder tippe /cancel)', {
             inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'master_manage_admins' }]]
         });
+    });
+
+    bot.on('message', async (ctx, next) => {
+        if (!ctx.session || !ctx.session.awaitingAdminId || !ctx.message.text) return next();
+        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) return next();
+        
+        const targetId = ctx.message.text.trim();
+        
+        if (targetId.toLowerCase() === '/cancel') {
+            ctx.session.awaitingAdminId = false;
+            return ctx.reply('Abgebrochen.');
+        }
+
+        if (!/^\d+$/.test(targetId)) {
+            return ctx.reply('⚠️ Das ist keine gültige ID. Bitte sende nur Zahlen.');
+        }
+
+        try {
+            await userRepo.updateUserRole(targetId, 'admin');
+            ctx.session.awaitingAdminId = false;
+            
+            await ctx.reply(`✅ Nutzer ${targetId} wurde zum Admin ernannt!`);
+            
+            const admins = await userRepo.getAllAdmins();
+            const keyboard = admins
+                .filter(a => Number(a.telegram_id) !== Number(config.MASTER_ADMIN_ID))
+                .map(a => ([{ text: `❌ ${a.username || a.telegram_id} entlassen`, callback_data: `master_fire_${a.telegram_id}` }]));
+            keyboard.push([{ text: '➕ Admin ernennen', callback_data: 'master_prompt_add_admin' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
+            
+            await ctx.reply('Aktualisierte Admin-Liste:', { reply_markup: { inline_keyboard: keyboard } });
+        } catch (error) {
+            console.error(error.message);
+            ctx.reply(texts.getGeneralError());
+        }
     });
 
     bot.action(/^master_fire_(.+)$/, isMasterAdmin, async (ctx) => {

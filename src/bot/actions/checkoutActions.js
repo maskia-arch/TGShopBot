@@ -8,12 +8,10 @@ const texts = require('../../utils/texts');
 
 module.exports = (bot) => {
     bot.action('checkout', async (ctx) => {
-        // Sofort quittieren, da nun DB-Abfragen für Cart und Payments folgen
         ctx.answerCbQuery().catch(() => {});
         try {
             const userId = ctx.from.id;
             
-            // Abfragen parallelisieren
             const [cart, paymentMethods] = await Promise.all([
                 cartRepo.getCart(userId),
                 paymentRepo.getActivePaymentMethods()
@@ -21,12 +19,11 @@ module.exports = (bot) => {
 
             if (!cart || cart.length === 0) {
                 return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
-                    inline_keyboard: [[{ text: 'Zurück zum Shop', callback_data: 'shop_menu' }]]
+                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
                 });
             }
 
             if (!paymentMethods || paymentMethods.length === 0) {
-                // Details für manuelle Abwicklung laden
                 const [cartTotal, orderDetails] = await Promise.all([
                     cartRepo.getCartTotal(userId),
                     cartRepo.getCartDetails(userId)
@@ -57,42 +54,46 @@ module.exports = (bot) => {
                 inline_keyboard: keyboard 
             });
         } catch (error) {
-            console.error(error.message);
+            console.error('Checkout Error:', error.message);
         }
     });
 
     bot.action('confirm_manual', async (ctx) => {
-        // Hier kein sofortiges answerCbQuery, damit der User merkt, dass die Bestellung verarbeitet wird (Sicherheit)
         try {
             const userId = ctx.from.id;
-            const username = ctx.from.username || ctx.from.first_name;
+            const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
             
             const [orderDetails, cartTotal] = await Promise.all([
                 cartRepo.getCartDetails(userId),
                 cartRepo.getCartTotal(userId)
             ]);
+
+            if (!orderDetails || orderDetails.length === 0) {
+                ctx.answerCbQuery('Warenkorb ist bereits leer!').catch(() => {});
+                return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
+                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                });
+            }
             
             await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
+            await cartRepo.clearCart(userId);
+            
+            ctx.answerCbQuery('✅ Bestellung aufgegeben').catch(() => {});
 
-            await notificationService.notifyAdminsNewOrder({
+            notificationService.notifyAdminsNewOrder({
                 userId,
                 username,
                 orderDetails,
                 paymentId: 'MANUAL'
-            });
-
-            await cartRepo.clearCart(userId);
-            
-            // Jetzt bestätigen
-            ctx.answerCbQuery('✅ Bestellung aufgegeben').catch(() => {});
+            }).catch(() => {});
 
             const text = '🎉 *Vielen Dank für deine Bestellung!*\n\nDeine Anfrage wurde übermittelt. Ein Admin wird dich in Kürze kontaktieren, um die Zahlung privat zu klären.';
             const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
-            console.error(error.message);
-            ctx.answerCbQuery('❌ Fehler bei der Bestellung').catch(() => {});
+            console.error('Confirm Manual Error:', error.message);
+            ctx.answerCbQuery('❌ Fehler bei der Bestellung', { show_alert: true }).catch(() => {});
         }
     });
 
@@ -108,45 +109,56 @@ module.exports = (bot) => {
                 paymentRepo.getPaymentMethod(paymentId)
             ]);
 
+            if (!orderDetails || orderDetails.length === 0) {
+                return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
+                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                });
+            }
+
             const text = formatters.formatInvoice(orderDetails, cartTotal, paymentMethod) + 
                          '\n\n*Möchtest du den Kauf nun zahlungspflichtig abschließen?*';
             
             const keyboard = [
-                [{ text: '✅ Bestellung abschicken', callback_data: `confirm_${paymentId}` }],
+                [{ text: '✅ Bestellung abschicken', callback_data: `confirm_pay_${paymentId}` }],
                 [{ text: '🔙 Zurück zur Auswahl', callback_data: 'checkout' }]
             ];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
-            console.error(error.message);
+            console.error('Payment Select Error:', error.message);
         }
     });
 
-    bot.action(/^confirm_(.+)$/, async (ctx) => {
-        // Bei finalen Klicks lassen wir die Sanduhr kurz laufen, während die Order in die DB geschrieben wird
+    bot.action(/^confirm_pay_(.+)$/, async (ctx) => {
         try {
             const paymentId = ctx.match[1];
             const userId = ctx.from.id;
-            const username = ctx.from.username || ctx.from.first_name;
+            const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
             
             const [cartTotal, orderDetails, paymentMethod] = await Promise.all([
                 cartRepo.getCartTotal(userId),
                 cartRepo.getCartDetails(userId),
                 paymentRepo.getPaymentMethod(paymentId)
             ]);
+
+            if (!orderDetails || orderDetails.length === 0) {
+                ctx.answerCbQuery('Warenkorb ist bereits leer!').catch(() => {});
+                return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
+                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                });
+            }
             
             await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
+            await cartRepo.clearCart(userId);
+            
+            ctx.answerCbQuery('✅ Bestellung erfolgreich').catch(() => {});
 
-            await notificationService.notifyAdminsNewOrder({
+            notificationService.notifyAdminsNewOrder({
                 userId,
                 username,
                 orderDetails,
                 paymentId
-            });
-
-            await cartRepo.clearCart(userId);
-            
-            ctx.answerCbQuery('✅ Bestellung erfolgreich').catch(() => {});
+            }).catch(() => {});
 
             const text = texts.getCheckoutFinalInstructions(
                 paymentMethod.name, 
@@ -158,8 +170,8 @@ module.exports = (bot) => {
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
-            console.error(error.message);
-            ctx.answerCbQuery('❌ Fehler beim Abschluss').catch(() => {});
+            console.error('Confirm Pay Error:', error.message);
+            ctx.answerCbQuery('❌ Fehler beim Abschluss', { show_alert: true }).catch(() => {});
         }
     });
 };

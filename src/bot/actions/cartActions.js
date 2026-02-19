@@ -4,13 +4,11 @@ const texts = require('../../utils/texts');
 
 module.exports = (bot) => {
     bot.action('cart_view', async (ctx) => {
-        // Sofort quittieren für flüssiges Gefühl
         ctx.answerCbQuery().catch(() => {});
         
         try {
             const userId = ctx.from.id;
             
-            // Datenbankabfragen parallelisieren für maximale Geschwindigkeit
             const [cartItems, cartTotal] = await Promise.all([
                 cartRepo.getCartDetails(userId),
                 cartRepo.getCartTotal(userId)
@@ -27,11 +25,11 @@ module.exports = (bot) => {
 
             cartItems.forEach((item, index) => {
                 text += `${index + 1}. *${item.name}*\n`;
-                text += `Menge: ${item.quantity} | Preis: ${item.total.toFixed(2)}€\n\n`;
+                text += `Menge: ${item.quantity} | Preis: ${parseFloat(item.total).toFixed(2)}€\n\n`;
                 keyboard.push([{ text: `❌ ${item.name} entfernen`, callback_data: `remove_item_${item.id}` }]);
             });
 
-            text += `💰 *Gesamtsumme: ${cartTotal.toFixed(2)}€*`;
+            text += `💰 *Gesamtsumme: ${parseFloat(cartTotal).toFixed(2)}€*`;
 
             keyboard.push([{ text: '💳 Zur Kasse gehen', callback_data: 'checkout' }]);
             keyboard.push([{ text: '🗑 Kompletten Warenkorb leeren', callback_data: 'clear_cart' }]);
@@ -39,7 +37,7 @@ module.exports = (bot) => {
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
-            console.error('Cart View Speed Error:', error.message);
+            console.error('Cart View Error:', error.message);
         }
     });
 
@@ -48,16 +46,14 @@ module.exports = (bot) => {
             const cartId = ctx.match[1];
             await cartRepo.removeFromCart(cartId);
             
-            // Schnelles Feedback via Toast
             ctx.answerCbQuery('🗑 Artikel entfernt!').catch(() => {});
             
-            // Warenkorb sofort neu laden (interner Trigger für Snap-Update)
-            return bot.handleUpdate({ 
-                ...ctx.update, 
-                callback_query: { ...ctx.callbackQuery, data: 'cart_view' } 
-            });
+            ctx.match = null;
+            ctx.update.callback_query.data = 'cart_view';
+            return bot.handleUpdate(ctx.update);
         } catch (error) {
             console.error('Cart Remove Error:', error.message);
+            ctx.answerCbQuery('❌ Fehler beim Entfernen', { show_alert: true }).catch(() => {});
         }
     });
 
@@ -65,7 +61,6 @@ module.exports = (bot) => {
         try {
             await cartRepo.clearCart(ctx.from.id);
             
-            // Sofort bestätigen
             ctx.answerCbQuery('🧹 Warenkorb geleert!').catch(() => {});
             
             await uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
@@ -73,6 +68,7 @@ module.exports = (bot) => {
             });
         } catch (error) {
             console.error('Cart Clear Error:', error.message);
+            ctx.answerCbQuery('❌ Fehler beim Leeren', { show_alert: true }).catch(() => {});
         }
     });
 };

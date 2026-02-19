@@ -17,8 +17,13 @@ const cleanup = async (ctx) => {
 
 const cancelAndLeave = async (ctx) => {
     await cleanup(ctx);
-    const m = await ctx.reply(texts.getActionCanceled(), { reply_markup: { remove_keyboard: true } });
-    setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, m.message_id).catch(() => {}), 2500);
+    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+    
+    ctx.update.callback_query = { 
+        data: ctx.wizard.state.productData.categoryId ? `admin_prod_cat_${ctx.wizard.state.productData.categoryId}` : 'admin_manage_products', 
+        from: ctx.from 
+    };
+    
     return ctx.scene.leave();
 };
 
@@ -46,12 +51,11 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
             });
@@ -76,12 +80,11 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
             });
@@ -106,12 +109,11 @@ const addProductScene = new Scenes.WizardScene(
         }
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
             });
@@ -141,22 +143,15 @@ const addProductScene = new Scenes.WizardScene(
         return ctx.wizard.next();
     },
     async (ctx) => {
-        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
-        }
         if (!ctx.message || !ctx.message.text) return;
 
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
-        if (input === '❌ Abbrechen') {
-            return cancelAndLeave(ctx);
-        }
+        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
@@ -183,22 +178,13 @@ const addProductScene = new Scenes.WizardScene(
         return ctx.wizard.next();
     },
     async (ctx) => {
-        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
-        }
-        
         if (ctx.message) ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         
         const input = ctx.message?.text;
-        
-        if (input === '❌ Abbrechen') {
-            return cancelAndLeave(ctx);
-        }
+        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
 
         if (input && input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, ein Produkt anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Überspringen' }], [{ text: '❌ Abbrechen' }]],
@@ -220,11 +206,10 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
                 finalImageUrl = await uploadToDezentral(fileLink.href);
             } catch (error) {
-                console.error(error.message);
+                console.error('Image Upload Error:', error.message);
             }
-        } else if (input && input.toLowerCase() === 'überspringen') {
-            const removeMsg = await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
-            ctx.wizard.state.messagesToDelete.push(removeMsg.message_id);
+        } else {
+            await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
         }
 
         ctx.wizard.state.productData.imageUrl = finalImageUrl;
@@ -233,7 +218,7 @@ const addProductScene = new Scenes.WizardScene(
             const newProduct = await productRepo.addProduct(ctx.wizard.state.productData);
             await cleanup(ctx); 
             
-            const createdId = newProduct ? (newProduct.id || (newProduct[0] && newProduct[0].id)) : null;
+            const createdId = (newProduct && newProduct.id) || (newProduct && newProduct[0] && newProduct[0].id);
             
             let catName = 'Kategorielos';
             if (ctx.wizard.state.productData.categoryId) {
@@ -242,29 +227,30 @@ const addProductScene = new Scenes.WizardScene(
                 if (cat) catName = cat.name;
             }
 
-            const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
-            const time = new Date().toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
-
-            if (createdId && Number(ctx.from.id) !== Number(config.MASTER_ADMIN_ID) && notificationService.notifyMasterNewProduct) {
-                await notificationService.notifyMasterNewProduct({
-                    adminName,
+            if (createdId && Number(ctx.from.id) !== Number(config.MASTER_ADMIN_ID)) {
+                notificationService.notifyMasterNewProduct({
+                    adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
                     productName: ctx.wizard.state.productData.name,
                     categoryName: catName,
-                    time,
+                    time: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
                     productId: createdId
-                });
+                }).catch(() => {});
             }
             
-            const succ = await ctx.reply(`✅ Produkt "${ctx.wizard.state.productData.name}" erstellt!`, { reply_markup: { remove_keyboard: true } });
-            setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, succ.message_id).catch(() => {}), 3000);
+            await ctx.reply(`✅ Produkt "${ctx.wizard.state.productData.name}" erstellt!`);
+
+            ctx.update.callback_query = { 
+                data: ctx.wizard.state.productData.categoryId ? `admin_prod_cat_${ctx.wizard.state.productData.categoryId}` : 'admin_prod_cat_none', 
+                from: ctx.from 
+            };
+            
+            return ctx.scene.leave();
         } catch (error) {
-            console.error(error.message);
+            console.error('AddProduct Error:', error.message);
             await cleanup(ctx);
-            const err = await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
-            setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, err.message_id).catch(() => {}), 3000);
+            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
+            return ctx.scene.leave();
         }
-        
-        return ctx.scene.leave();
     }
 );
 

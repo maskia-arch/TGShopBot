@@ -14,9 +14,10 @@ const cleanup = async (ctx) => {
     }
 };
 
-const cancelAndLeave = async (ctx) => {
+const backToProduct = async (ctx) => {
     await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+    const productId = ctx.wizard.state.productId;
+    ctx.update.callback_query = { data: `admin_edit_prod_${productId}`, from: ctx.from };
     return ctx.scene.leave();
 };
 
@@ -29,8 +30,7 @@ const editPriceScene = new Scenes.WizardScene(
         
         ctx.wizard.state.productId = productId;
         ctx.wizard.state.productName = product.name;
-        
-        ctx.wizard.state.lastQuestion = `💰 *Preisänderung*\nProdukt: "${product.name}"\nAktuell: ${product.price}€\n\nBitte sende mir den neuen Preis:`;
+        ctx.wizard.state.lastQuestion = `💰 *Preisänderung*\n\nProdukt: "${product.name}"\nAktuell: ${product.price.toFixed(2)}€\n\nBitte sende mir den neuen Preis:`;
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -45,33 +45,29 @@ const editPriceScene = new Scenes.WizardScene(
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
+            return backToProduct(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
         
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, einen Preis zu ändern.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
             return;
         }
 
-        const cleanInput = input.replace(',', '.');
-        const newPrice = parseFloat(cleanInput);
+        const newPrice = parseFloat(input.replace(',', '.'));
 
         if (isNaN(newPrice) || newPrice <= 0) {
-            ctx.wizard.state.lastQuestion = '⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):';
-            const errorMsg = await ctx.reply(ctx.wizard.state.lastQuestion, {
+            const errorMsg = await ctx.reply('⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):', {
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }
@@ -91,30 +87,33 @@ const editPriceScene = new Scenes.WizardScene(
                 formattedPrice
             );
 
-            const requestedBy = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
-
             if (notificationService.notifyMasterApproval) {
-                await notificationService.notifyMasterApproval({
-                    approvalId: approval ? approval.id : 'NEW',
+                notificationService.notifyMasterApproval({
+                    approvalId: approval.id,
                     actionType: 'PRICE_CHANGE',
                     productId: productId,
                     productName: ctx.wizard.state.productName,
-                    requestedBy: requestedBy,
+                    requestedBy: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
                     newValue: formattedPrice
-                });
+                }).catch(() => {});
             }
 
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, `Anfrage für ${ctx.wizard.state.productName} (${formattedPrice}€) gesendet!`, 5);
+            await ctx.reply(`✅ Anfrage für "${ctx.wizard.state.productName}" (${formattedPrice}€) wurde an den Master gesendet.`);
             
+            return backToProduct(ctx);
         } catch (error) {
-            console.error(error.message);
+            console.error('EditPrice Error:', error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
+            await ctx.reply(texts.getGeneralError());
+            return ctx.scene.leave();
         }
-        
-        return ctx.scene.leave();
     }
 );
+
+editPriceScene.action('cancel_scene', async (ctx) => {
+    await ctx.answerCbQuery('Abgebrochen');
+    return backToProduct(ctx);
+});
 
 module.exports = editPriceScene;

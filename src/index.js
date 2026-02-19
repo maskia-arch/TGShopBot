@@ -18,6 +18,7 @@ const askQuantityScene = require('./bot/scenes/askQuantityScene');
 const editPriceScene = require('./bot/scenes/editPriceScene');
 const broadcastScene = require('./bot/scenes/broadcastScene');
 const editProductImageScene = require('./bot/scenes/editProductImageScene');
+const addPaymentMethodScene = require('./bot/scenes/addPaymentMethodScene');
 
 const notificationService = require('./services/notificationService');
 
@@ -47,15 +48,15 @@ const stage = new Scenes.Stage([
     askQuantityScene,
     editPriceScene,
     broadcastScene,
-    editProductImageScene
+    editProductImageScene,
+    addPaymentMethodScene
 ]);
 
 bot.use(session());
 bot.use(stage.middleware());
 
-// Globaler Fehler-Catcher, damit der Bot nicht mehr einfriert
 bot.catch((err, ctx) => {
-    console.error(`Update-Fehler bei ${ctx.updateType}:`, err.message);
+    console.error(`Update Error [${ctx.updateType}]:`, err.message);
 });
 
 startCommand(bot);
@@ -67,13 +68,11 @@ checkoutActions(bot);
 adminActions(bot);
 masterActions(bot);
 
-// Auto-Reconnect Logik
 const startBot = () => {
     bot.launch().then(() => {
         console.log(`Bot v${config.VERSION} started`);
     }).catch((error) => {
         console.error('Telegram Connection Error:', error.message);
-        console.log('Versuche Neustart in 5 Sekunden...');
         setTimeout(startBot, 5000);
     });
 };

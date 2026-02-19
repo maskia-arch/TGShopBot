@@ -16,7 +16,7 @@ const addCategoryScene = new Scenes.WizardScene(
     'addCategoryScene',
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
-        ctx.wizard.state.lastQuestion = '📂 *Neue Kategorie*\nBitte sende mir den Namen der Kategorie:';
+        ctx.wizard.state.lastQuestion = '📂 *Neue Kategorie*\n\nBitte sende mir jetzt den **Namen** der neuen Kategorie:';
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -32,41 +32,53 @@ const addCategoryScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
-            return ctx.scene.leave();
+            await ctx.scene.leave();
+            
+            const adminActions = require('../actions/adminActions');
+            ctx.update.callback_query = { data: 'admin_manage_categories', from: ctx.from };
+            return;
         }
 
         if (!ctx.message || !ctx.message.text) return;
         
-        const input = ctx.message.text;
+        const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            try { await ctx.deleteMessage(); } catch (e) {}
-            
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nDu bist gerade dabei, eine neue Kategorie anzulegen.\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\nBitte sende erst den Kategorienamen oder klicke auf Abbrechen.\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            
             return; 
         }
         
         try {
             await productRepo.addCategory(input);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, `✅ Kategorie "${input}" erstellt!`, 3);
+            await ctx.reply(texts.getCategoryCreated(input), { parse_mode: 'Markdown' });
+
+            const adminActions = require('../actions/adminActions');
+            ctx.update.callback_query = { data: 'admin_manage_categories', from: ctx.from };
+            
+            return ctx.scene.leave();
         } catch (error) {
-            console.error(error.message);
+            console.error('AddCategory Error:', error.message);
             await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
+            await ctx.reply(texts.getGeneralError());
+            return ctx.scene.leave();
         }
-        
-        return ctx.scene.leave();
     }
 );
+
+addCategoryScene.action('cancel_scene', async (ctx) => {
+    await ctx.answerCbQuery('Abgebrochen');
+    await cleanup(ctx);
+    await ctx.scene.leave();
+    
+    ctx.update.callback_query = { data: 'admin_manage_categories', from: ctx.from };
+});
 
 module.exports = addCategoryScene;
