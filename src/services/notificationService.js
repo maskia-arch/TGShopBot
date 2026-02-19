@@ -11,13 +11,18 @@ const init = (botInstance) => {
 
 const sendBroadcast = async (messageText, senderId) => {
     try {
-        const customers = await userRepo.getAllCustomers();
-        const admins = await userRepo.getAllAdmins();
+        // Parallel laden: Kunden und Admins
+        const [customers, admins] = await Promise.all([
+            userRepo.getAllCustomers(),
+            userRepo.getAllAdmins()
+        ]);
 
         let successCount = 0;
         let failCount = 0;
         const failedUsers = [];
 
+        // Broadcasts sollten wegen Telegram-Rate-Limits nacheinander (oder in kleinen Batches) gesendet werden.
+        // Um den Admin aber nicht warten zu lassen, könnte man dies im Hintergrund laufen lassen.
         for (const customer of customers) {
             try {
                 await bot.telegram.sendMessage(customer.telegram_id, messageText, { 
@@ -38,25 +43,28 @@ const sendBroadcast = async (messageText, senderId) => {
             blockCount: failedUsers.length
         }) + `\nGesendet von ID: ${senderId}`;
 
-        const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
-        const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
+        // Staff zusammenführen und Duplikate filtern
+        const masterId = Number(config.MASTER_ADMIN_ID);
+        const allStaff = [...admins, { telegram_id: masterId }];
+        const uniqueStaffIds = [...new Set(allStaff.map(s => Number(s.telegram_id)))];
 
-        for (const staff of uniqueStaff) {
+        // Benachrichtigung an alle Admins gleichzeitig (parallel) senden
+        await Promise.all(uniqueStaffIds.map(async (staffId) => {
             const keyboard = { inline_keyboard: [] };
             
-            if (failedUsers.length > 0 && Number(staff.telegram_id) === Number(config.MASTER_ADMIN_ID)) {
+            if (failedUsers.length > 0 && staffId === masterId) {
                 keyboard.inline_keyboard.push([{ text: '🗑 Blockierte User bereinigen', callback_data: 'master_cleanup_blocked' }]);
             }
 
-            await bot.telegram.sendMessage(staff.telegram_id, report, {
+            return bot.telegram.sendMessage(staffId, report, {
                 parse_mode: 'Markdown',
                 reply_markup: keyboard.inline_keyboard.length > 0 ? keyboard : undefined
             }).catch(() => {});
-        }
+        }));
 
         return { successCount, failCount, failedUsers };
     } catch (error) {
-        console.error(error.message);
+        console.error('Broadcast Error:', error.message);
     }
 };
 
@@ -64,17 +72,15 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
     try {
         let paymentMethodName = "Manuelle Abwicklung";
         
-        if (paymentId !== 'MANUAL') {
-            try {
-                const method = await paymentRepo.getPaymentMethod(paymentId);
-                if (method) paymentMethodName = method.name;
-            } catch (e) {
-                console.warn(e.message);
-            }
-        }
+        // Parallel: Zahlungsart laden und Admins laden
+        const [method, admins] = await Promise.all([
+            paymentId !== 'MANUAL' ? paymentRepo.getPaymentMethod(paymentId).catch(() => null) : null,
+            userRepo.getAllAdmins()
+        ]);
 
-        let total = 0;
-        orderDetails.forEach(item => total += parseFloat(item.total));
+        if (method) paymentMethodName = method.name;
+
+        const total = orderDetails.reduce((sum, item) => sum + parseFloat(item.total), 0);
 
         const orderText = texts.getAdminNewOrderNotify({
             username,
@@ -84,23 +90,21 @@ const notifyAdminsNewOrder = async ({ userId, username, orderDetails, paymentId 
         });
 
         const keyboard = {
-            inline_keyboard: [
-                [{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${userId}` }]
-            ]
+            inline_keyboard: [[{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${userId}` }]]
         };
 
-        const admins = await userRepo.getAllAdmins();
-        const allStaff = [...admins, { telegram_id: config.MASTER_ADMIN_ID }];
-        const uniqueStaff = [...new Map(allStaff.map(s => [s.telegram_id, s])).values()];
+        const masterId = Number(config.MASTER_ADMIN_ID);
+        const uniqueStaffIds = [...new Set([...admins.map(a => Number(a.telegram_id)), masterId])];
 
-        for (const staff of uniqueStaff) {
-            await bot.telegram.sendMessage(staff.telegram_id, orderText, {
+        // Alle Admins parallel benachrichtigen
+        await Promise.all(uniqueStaffIds.map(staffId => 
+            bot.telegram.sendMessage(staffId, orderText, {
                 parse_mode: 'Markdown',
                 reply_markup: keyboard
-            }).catch(() => {});
-        }
+            }).catch(() => {})
+        ));
     } catch (error) {
-        console.error(error.message);
+        console.error('Order Notify Error:', error.message);
     }
 };
 
@@ -128,12 +132,13 @@ const notifyMasterApproval = async ({ approvalId, actionType, productId, product
             ]
         };
 
-        await bot.telegram.sendMessage(masterId, text, {
+        // Kein await nötig, wenn wir nicht auf die Antwort warten müssen
+        bot.telegram.sendMessage(masterId, text, {
             parse_mode: 'Markdown',
             reply_markup: keyboard
         }).catch(() => {});
     } catch (error) {
-        console.error(error.message);
+        console.error('Approval Notify Error:', error.message);
     }
 };
 
@@ -157,12 +162,12 @@ const notifyMasterNewProduct = async ({ adminName, productName, categoryName, ti
             ]
         };
 
-        await bot.telegram.sendMessage(masterId, text, {
+        bot.telegram.sendMessage(masterId, text, {
             parse_mode: 'Markdown',
             reply_markup: keyboard
         }).catch(() => {});
     } catch (error) {
-        console.error(error.message);
+        console.error('New Product Notify Error:', error.message);
     }
 };
 

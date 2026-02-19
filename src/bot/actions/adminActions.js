@@ -9,8 +9,10 @@ const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
     bot.action('admin_panel', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {}); // Sofort quittieren
         try {
             const userId = ctx.from.id;
+            // Rollenabfrage parallel zur Logik (falls Repo-Funktion asynchron ist)
             const role = await require('../../database/repositories/userRepo').getUserRole(userId);
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
             
@@ -34,6 +36,7 @@ module.exports = (bot) => {
     });
 
     bot.action('admin_start_broadcast', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             await ctx.scene.enter('broadcastScene');
         } catch (error) {
@@ -42,6 +45,7 @@ module.exports = (bot) => {
     });
 
     bot.action('admin_manage_categories', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const categories = await productRepo.getActiveCategories();
             const keyboard = categories.map(c => ([{ 
@@ -59,6 +63,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^admin_edit_cat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const categoryId = ctx.match[1];
             const categories = await productRepo.getActiveCategories();
@@ -78,40 +83,8 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^admin_rename_cat_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            await ctx.scene.enter('renameCategoryScene', { categoryId: ctx.match[1] });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action(/^admin_del_cat_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            const categoryId = ctx.match[1];
-            await productRepo.deleteCategory(categoryId);
-            await ctx.answerCbQuery('✅ Kategorie gelöscht!');
-            
-            const categories = await productRepo.getActiveCategories();
-            const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `admin_edit_cat_${c.id}` }]));
-            keyboard.push([{ text: '➕ Neue Kategorie', callback_data: 'admin_add_category' }]);
-            keyboard.push([{ text: '🔙 Zurück zum Admin-Menü', callback_data: 'admin_panel' }]);
-            
-            await uiHelper.updateOrSend(ctx, 'Kategorie entfernt. Übersicht aktualisiert:', { inline_keyboard: keyboard });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action('admin_add_category', isAdmin, async (ctx) => {
-        try {
-            await ctx.scene.enter('addCategoryScene');
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const categories = await productRepo.getActiveCategories();
             const keyboard = categories.map(c => ([{ 
@@ -130,6 +103,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^admin_prod_cat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
             const products = await productRepo.getProductsByCategory(categoryId, true);
@@ -151,6 +125,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const productId = ctx.match[1];
             const p = await productRepo.getProductById(productId);
@@ -176,50 +151,20 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^admin_edit_img_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            await ctx.scene.enter('editProductImageScene', { productId: ctx.match[1] });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action(/^admin_move_prod_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            const productId = ctx.match[1];
-            const categories = await productRepo.getActiveCategories();
-            const keyboard = categories.map(c => ([{ text: c.name, callback_data: `admin_confirm_move_${productId}_${c.id}` }]));
-            keyboard.push([{ text: '📦 Keine Kategorie', callback_data: `admin_confirm_move_${productId}_none` }]);
-            keyboard.push([{ text: '🔙 Abbrechen', callback_data: `admin_edit_prod_${productId}` }]);
-            await uiHelper.updateOrSend(ctx, 'Wähle die neue Ziel-Kategorie:', { inline_keyboard: keyboard });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action(/^admin_confirm_move_(.+)_+(.+)$/, isAdmin, async (ctx) => {
-        try {
-            const productId = ctx.match[1];
-            const categoryId = ctx.match[2] === 'none' ? null : ctx.match[2];
-            await productRepo.updateProductCategory(productId, categoryId);
-            await ctx.answerCbQuery('✅ Verschoben!');
-            const p = await productRepo.getProductById(productId);
-            const keyboard = [[{ text: '🔙 Zurück', callback_data: categoryId ? `admin_prod_cat_${categoryId}` : 'admin_prod_cat_none' }]];
-            await uiHelper.updateOrSend(ctx, `Produkt *${p.name}* wurde erfolgreich verschoben.`, { inline_keyboard: keyboard });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
     bot.action(/^admin_toggle_(stock|vis)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const type = ctx.match[1];
             const productId = ctx.match[2];
+            
+            // Erst umschalten
             const p = await productRepo.getProductById(productId);
             const field = type === 'stock' ? 'is_out_of_stock' : 'is_active';
             await productRepo.toggleProductStatus(productId, field, !p[field]);
-            await ctx.answerCbQuery('Status aktualisiert!');
             
+            // Sofort Bestätigung senden
+            ctx.answerCbQuery('✅ Status aktualisiert!').catch(() => {});
+            
+            // Dann aktualisierte Daten laden
             const updatedP = await productRepo.getProductById(productId);
             const stockLabel = updatedP.is_out_of_stock ? '✅ Wieder auf "Lagernd"' : '📦 Auf "Ausverkauft" setzen';
             const visLabel = updatedP.is_active ? '👻 Unsichtbar machen' : '👁 Öffentlich schalten';
@@ -244,19 +189,22 @@ module.exports = (bot) => {
     bot.action(/^admin_req_del_(.+)$/, isAdmin, async (ctx) => {
         try {
             const productId = ctx.match[1];
-            const approval = await approvalRepo.createApprovalRequest('DELETE', ctx.from.id, productId);
+            // Parallel: Anfrage erstellen und Produkt für Notification laden
+            const [approval, product] = await Promise.all([
+                approvalRepo.createApprovalRequest('DELETE', ctx.from.id, productId),
+                productRepo.getProductById(productId)
+            ]);
             
-            const product = await productRepo.getProductById(productId);
             const requestedBy = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
 
             if (notificationService.notifyMasterApproval) {
-                await notificationService.notifyMasterApproval({
+                notificationService.notifyMasterApproval({
                     approvalId: approval ? approval.id : 'NEW',
                     actionType: 'DELETE',
                     productId: productId,
                     productName: product ? product.name : 'Unbekanntes Produkt',
                     requestedBy: requestedBy
-                });
+                }).catch(e => console.error('Notify Error:', e.message));
             }
 
             await ctx.answerCbQuery('Löschanfrage gesendet!', { show_alert: true });
@@ -265,18 +213,11 @@ module.exports = (bot) => {
         }
     });
 
+    // Andere Szenen-Starts ebenfalls mit sofortigem Feedback
     bot.action(/^admin_req_price_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             await ctx.scene.enter('editPriceScene', { productId: ctx.match[1] });
-        } catch (error) {
-            console.error(error.message);
-        }
-    });
-
-    bot.action(/^admin_add_prod_to_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
-            await ctx.scene.enter('addProductScene', { categoryId });
         } catch (error) {
             console.error(error.message);
         }

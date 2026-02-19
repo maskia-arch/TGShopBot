@@ -5,7 +5,6 @@ const uiHelper = require('../../utils/uiHelper');
 const formatters = require('../../utils/formatters');
 const config = require('../../config');
 const texts = require('../../utils/texts');
-const { isAdmin } = require('../middlewares/auth');
 
 const masterMenu = require('../keyboards/masterMenu');
 const adminMenu = require('../keyboards/adminMenu');
@@ -13,30 +12,38 @@ const customerMenu = require('../keyboards/customerMenu');
 
 module.exports = (bot) => {
     bot.action('shop_menu', async (ctx) => {
+        // Sofort antworten, um die Sanduhr bei Telegram zu entfernen
+        ctx.answerCbQuery().catch(() => {});
+
         try {
             const userId = ctx.from.id;
-            const allCategories = await productRepo.getActiveCategories();
+            
+            // Datenbankabfragen parallel starten für mehr Speed
+            const [allCategories, role, noneProducts] = await Promise.all([
+                productRepo.getActiveCategories(),
+                userRepo.getUserRole(userId),
+                productRepo.getProductsByCategory(null)
+            ]);
+
             const keyboard = [];
 
-            for (const cat of allCategories) {
+            // Kategorien parallel prüfen, ob sie aktive Produkte enthalten
+            const categoryChecks = await Promise.all(allCategories.map(async (cat) => {
                 const products = await productRepo.getProductsByCategory(cat.id);
-                const activeProducts = products.filter(p => p.is_active);
-                if (activeProducts.length > 0) {
-                    keyboard.push([{ text: cat.name, callback_data: `category_${cat.id}` }]);
-                }
-            }
+                const hasActive = products.some(p => p.is_active);
+                return hasActive ? cat : null;
+            }));
 
-            const noneProducts = await productRepo.getProductsByCategory(null);
+            categoryChecks.forEach(cat => {
+                if (cat) keyboard.push([{ text: cat.name, callback_data: `category_${cat.id}` }]);
+            });
+
             const activeNoneProducts = noneProducts.filter(p => p.is_active);
             if (activeNoneProducts.length > 0) {
                 keyboard.push([{ text: '📦 Sonstiges / Einzelstücke', callback_data: 'category_none' }]);
             }
 
-            // Sicherere Prüfung der Rolle und des Ursprungs
-            const role = await userRepo.getUserRole(userId);
             const userIsAdmin = (role === 'admin' || userId === Number(config.MASTER_ADMIN_ID));
-            
-            // Nur wenn der Button-Klick explizit "admin" im Data-Feld hat
             const fromAdminContext = ctx.callbackQuery.data.includes('admin');
 
             if (userIsAdmin && fromAdminContext) {
@@ -46,20 +53,25 @@ module.exports = (bot) => {
                 keyboard.push([{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]);
             }
 
-            const text = '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:';
-            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
+            await uiHelper.updateOrSend(ctx, '🛒 *Shop-Menü*\nBitte wähle eine Kategorie:', { inline_keyboard: keyboard });
 
         } catch (error) {
-            console.error(error.message);
+            console.error('Speed-Shop Error:', error.message);
         }
     });
 
     bot.action(/^category_(.+)$/, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
-            const allProducts = await productRepo.getProductsByCategory(categoryId);
-            const visibleProducts = allProducts.filter(p => p.is_active);
+            
+            // Parallel laden: Produkte und Warenkorb
+            const [allProducts, cart] = await Promise.all([
+                productRepo.getProductsByCategory(categoryId),
+                cartRepo.getCart(ctx.from.id)
+            ]);
 
+            const visibleProducts = allProducts.filter(p => p.is_active);
             const keyboard = visibleProducts.map(p => ([{ 
                 text: p.is_out_of_stock ? `❌ ${p.name}` : p.name, 
                 callback_data: `product_${p.id}` 
@@ -67,23 +79,25 @@ module.exports = (bot) => {
             
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
 
-            const cart = await cartRepo.getCart(ctx.from.id);
             if (cart && cart.length > 0) {
                 keyboard.push([{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]);
             }
 
             const text = categoryId === null ? '*Sonstige Produkte:*' : '*Verfügbare Produkte:*';
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
-
         } catch (error) {
             console.error(error.message);
         }
     });
 
     bot.action(/^product_(.+)$/, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const productId = ctx.match[1];
-            const product = await productRepo.getProductById(productId);
+            const [product, cart] = await Promise.all([
+                productRepo.getProductById(productId),
+                cartRepo.getCart(ctx.from.id)
+            ]);
             
             let caption = `📦 *${product.name}*\n\n${product.description}\n\nPreis: *${formatters.formatPrice(product.price)}*`;
             if (product.is_unit_price) caption += ' (pro Stück)';
@@ -99,13 +113,11 @@ module.exports = (bot) => {
             const backTarget = product.category_id ? `category_${product.category_id}` : 'category_none';
             keyboard.push([{ text: '🔙 Zurück', callback_data: backTarget }]);
 
-            const cart = await cartRepo.getCart(ctx.from.id);
             if (cart && cart.length > 0) {
                 keyboard.push([{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]);
             }
 
             await uiHelper.updateOrSend(ctx, caption, { inline_keyboard: keyboard }, product.image_url);
-
         } catch (error) {
             console.error(error.message);
         }
@@ -121,18 +133,18 @@ module.exports = (bot) => {
             }
 
             if (product.is_unit_price) {
+                ctx.answerCbQuery().catch(() => {});
                 return ctx.scene.enter('askQuantityScene', { productId });
             }
 
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             await cartRepo.addToCart(ctx.from.id, productId, 1, username);
             
+            ctx.answerCbQuery('Hinzugefügt!').catch(() => {});
             await uiHelper.sendTemporary(ctx, texts.getAddToCartSuccess(product.name), 3);
-            await ctx.answerCbQuery('Hinzugefügt!');
 
             ctx.match = [null, productId];
             bot.handleUpdate({ ...ctx.update, callback_query: { ...ctx.callbackQuery, data: `product_${productId}` } });
-
         } catch (error) {
             console.error(error.message);
         }
@@ -143,6 +155,7 @@ module.exports = (bot) => {
     });
 
     bot.action('back_to_main', async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const userId = ctx.from.id;
             const role = await userRepo.getUserRole(userId);
@@ -162,6 +175,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^(info|help|info_menu|help_menu)$/, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const keyboard = {
                 inline_keyboard: [[{ text: '🔙 Zurück zum Hauptmenü', callback_data: 'back_to_main' }]]

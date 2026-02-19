@@ -8,9 +8,16 @@ const texts = require('../../utils/texts');
 
 module.exports = (bot) => {
     bot.action('checkout', async (ctx) => {
+        // Sofort quittieren, da nun DB-Abfragen für Cart und Payments folgen
+        ctx.answerCbQuery().catch(() => {});
         try {
             const userId = ctx.from.id;
-            const cart = await cartRepo.getCart(userId);
+            
+            // Abfragen parallelisieren
+            const [cart, paymentMethods] = await Promise.all([
+                cartRepo.getCart(userId),
+                paymentRepo.getActivePaymentMethods()
+            ]);
 
             if (!cart || cart.length === 0) {
                 return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
@@ -18,11 +25,12 @@ module.exports = (bot) => {
                 });
             }
 
-            const paymentMethods = await paymentRepo.getActivePaymentMethods();
-
             if (!paymentMethods || paymentMethods.length === 0) {
-                const cartTotal = await cartRepo.getCartTotal(userId);
-                const orderDetails = await cartRepo.getCartDetails(userId);
+                // Details für manuelle Abwicklung laden
+                const [cartTotal, orderDetails] = await Promise.all([
+                    cartRepo.getCartTotal(userId),
+                    cartRepo.getCartDetails(userId)
+                ]);
                 
                 const manualMethod = { name: 'Privat-Chat / Manuelle Abwicklung', wallet_address: null };
                 
@@ -54,11 +62,15 @@ module.exports = (bot) => {
     });
 
     bot.action('confirm_manual', async (ctx) => {
+        // Hier kein sofortiges answerCbQuery, damit der User merkt, dass die Bestellung verarbeitet wird (Sicherheit)
         try {
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
-            const orderDetails = await cartRepo.getCartDetails(userId);
-            const cartTotal = await cartRepo.getCartTotal(userId);
+            
+            const [orderDetails, cartTotal] = await Promise.all([
+                cartRepo.getCartDetails(userId),
+                cartRepo.getCartTotal(userId)
+            ]);
             
             await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
 
@@ -70,26 +82,31 @@ module.exports = (bot) => {
             });
 
             await cartRepo.clearCart(userId);
+            
+            // Jetzt bestätigen
+            ctx.answerCbQuery('✅ Bestellung aufgegeben').catch(() => {});
 
             const text = '🎉 *Vielen Dank für deine Bestellung!*\n\nDeine Anfrage wurde übermittelt. Ein Admin wird dich in Kürze kontaktieren, um die Zahlung privat zu klären.';
-            
-            // Geändert: Führt nun zum echten Hauptmenü (start.js)
             const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
+            ctx.answerCbQuery('❌ Fehler bei der Bestellung').catch(() => {});
         }
     });
 
     bot.action(/^payment_(.+)$/, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const paymentId = ctx.match[1];
             const userId = ctx.from.id;
             
-            const cartTotal = await cartRepo.getCartTotal(userId);
-            const orderDetails = await cartRepo.getCartDetails(userId);
-            const paymentMethod = await paymentRepo.getPaymentMethod(paymentId);
+            const [cartTotal, orderDetails, paymentMethod] = await Promise.all([
+                cartRepo.getCartTotal(userId),
+                cartRepo.getCartDetails(userId),
+                paymentRepo.getPaymentMethod(paymentId)
+            ]);
 
             const text = formatters.formatInvoice(orderDetails, cartTotal, paymentMethod) + 
                          '\n\n*Möchtest du den Kauf nun zahlungspflichtig abschließen?*';
@@ -106,14 +123,17 @@ module.exports = (bot) => {
     });
 
     bot.action(/^confirm_(.+)$/, async (ctx) => {
+        // Bei finalen Klicks lassen wir die Sanduhr kurz laufen, während die Order in die DB geschrieben wird
         try {
             const paymentId = ctx.match[1];
             const userId = ctx.from.id;
             const username = ctx.from.username || ctx.from.first_name;
             
-            const cartTotal = await cartRepo.getCartTotal(userId);
-            const orderDetails = await cartRepo.getCartDetails(userId);
-            const paymentMethod = await paymentRepo.getPaymentMethod(paymentId);
+            const [cartTotal, orderDetails, paymentMethod] = await Promise.all([
+                cartRepo.getCartTotal(userId),
+                cartRepo.getCartDetails(userId),
+                paymentRepo.getPaymentMethod(paymentId)
+            ]);
             
             await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails);
 
@@ -125,6 +145,8 @@ module.exports = (bot) => {
             });
 
             await cartRepo.clearCart(userId);
+            
+            ctx.answerCbQuery('✅ Bestellung erfolgreich').catch(() => {});
 
             const text = texts.getCheckoutFinalInstructions(
                 paymentMethod.name, 
@@ -132,12 +154,12 @@ module.exports = (bot) => {
                 `${cartTotal}€`
             ) + '\n\nEin Admin wird deine Zahlung prüfen und sich schnellstmöglich bei dir melden.';
             
-            // Geändert: Führt nun zum echten Hauptmenü (start.js)
             const keyboard = [[{ text: '🏠 Zum Hauptmenü', callback_data: 'back_to_main' }]];
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
             console.error(error.message);
+            ctx.answerCbQuery('❌ Fehler beim Abschluss').catch(() => {});
         }
     });
 };

@@ -2,33 +2,30 @@ const supabase = require('../supabaseClient');
 const config = require('../../config');
 
 const upsertUser = async (userId, username) => {
-    const { data: existing, error: fetchError } = await supabase
+    // Optimierung: Direkt ein upsert mit onConflict nutzen statt erst zu suchen.
+    // Das spart einen kompletten Datenbank-Roundtrip.
+    const { error } = await supabase
         .from('users')
-        .select('telegram_id')
-        .eq('telegram_id', userId)
-        .single();
+        .upsert(
+            { telegram_id: userId, username: username, role: 'customer' },
+            { onConflict: 'telegram_id', ignoreDuplicates: true }
+        );
 
-    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
-
-    if (!existing) {
-        const { error: insertError } = await supabase
-            .from('users')
-            .insert([{ telegram_id: userId, username: username, role: 'customer' }]);
-        
-        if (insertError) throw insertError;
-    }
+    if (error) throw error;
 };
 
 const getUserRole = async (userId) => {
+    // Hardcoded Master-Check ist bereits sehr schnell
     if (Number(userId) === Number(config.MASTER_ADMIN_ID)) return 'master';
 
+    // Optimierung: Nur das 'role' Feld anfragen, nicht den ganzen Datensatz
     const { data, error } = await supabase
         .from('users')
         .select('role')
         .eq('telegram_id', userId)
-        .single();
+        .maybeSingle(); // maybeSingle() ist performanter als .single() mit Error-Handling
 
-    if (error && error.code !== 'PGRST116') throw error;
+    if (error) throw error;
     
     return data ? data.role : 'customer';
 };
@@ -38,11 +35,12 @@ const isMasterAdmin = async (userId) => {
 };
 
 const updateUserRole = async (targetId, role) => {
+    // Optimierung: Nur ID zurückgeben zur Bestätigung
     const { data, error } = await supabase
         .from('users')
         .update({ role: role })
         .eq('telegram_id', targetId)
-        .select();
+        .select('telegram_id');
 
     if (error) throw error;
     return data && data.length > 0;
@@ -67,9 +65,10 @@ const deleteUser = async (telegramId) => {
 };
 
 const getAllAdmins = async () => {
+    // Optimierung: Felder einschränken
     const { data, error } = await supabase
         .from('users')
-        .select('*')
+        .select('telegram_id, username, role')
         .eq('role', 'admin');
 
     if (error) throw error;
@@ -78,7 +77,7 @@ const getAllAdmins = async () => {
     
     admins.unshift({
         telegram_id: config.MASTER_ADMIN_ID,
-        username: 'Master (Env)',
+        username: 'Master (System)',
         role: 'master'
     });
 
@@ -86,9 +85,10 @@ const getAllAdmins = async () => {
 };
 
 const getAllCustomers = async () => {
+    // Optimierung: Felder einschränken (keine unnötigen Metadaten laden)
     const { data, error } = await supabase
         .from('users')
-        .select('*')
+        .select('telegram_id, username, role')
         .eq('role', 'customer');
 
     if (error) throw error;

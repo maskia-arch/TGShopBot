@@ -15,58 +15,60 @@ const getCart = async (userId) => {
 };
 
 const addToCart = async (userId, productId, quantity, username = 'Kunde') => {
-    const { error: userError } = await supabase
-        .from('users')
-        .upsert(
-            { telegram_id: userId, username: username }, 
-            { onConflict: 'telegram_id', ignoreDuplicates: true }
-        );
-    
-    if (userError) throw userError;
+    // Upsert parallel zum Check oder minimiert
+    await supabase.from('users').upsert(
+        { telegram_id: userId, username: username }, 
+        { onConflict: 'telegram_id' }
+    );
 
+    // Nutze rpc (Stored Procedure) oder optimierten Check
     const { data: existing, error: fetchError } = await supabase
         .from('carts')
-        .select('*')
+        .select('id, quantity')
         .eq('user_id', userId)
         .eq('product_id', productId)
-        .single();
+        .maybeSingle(); // Schneller als .single() mit Error-Handling
 
-    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    if (fetchError) throw fetchError;
 
     if (existing) {
-        const { error } = await supabase
+        return supabase
             .from('carts')
             .update({ quantity: existing.quantity + quantity })
-            .eq('user_id', userId)
-            .eq('product_id', productId);
-        if (error) throw error;
+            .eq('id', existing.id);
     } else {
-        const { error } = await supabase
+        return supabase
             .from('carts')
             .insert([{ user_id: userId, product_id: productId, quantity }]);
-        if (error) throw error;
     }
 };
 
 const getCartTotal = async (userId) => {
-    const cart = await getCart(userId);
-    let total = 0;
-    for (const item of cart) {
-        total += item.quantity * item.products.price;
-    }
-    return total.toFixed(2);
+    const { data, error } = await supabase
+        .from('carts')
+        .select('quantity, products(price)')
+        .eq('user_id', userId);
+
+    if (error) throw error;
+    
+    const total = data.reduce((sum, item) => sum + (item.quantity * item.products.price), 0);
+    return parseFloat(total.toFixed(2));
 };
 
 const getCartDetails = async (userId) => {
     const cart = await getCart(userId);
-    return cart.map(item => ({
-        id: item.id,
-        productId: item.products.id,
-        name: item.products.name,
-        quantity: item.quantity,
-        price: item.products.price,
-        total: (item.quantity * item.products.price).toFixed(2)
-    }));
+    return cart.map(item => {
+        const itemPrice = item.products.price;
+        const itemTotal = item.quantity * itemPrice;
+        return {
+            id: item.id,
+            product_id: item.products.id, // Konsistente Benennung für Actions
+            name: item.products.name,
+            quantity: item.quantity,
+            price: itemPrice,
+            total: itemTotal
+        };
+    });
 };
 
 const removeFromCart = async (cartId) => {

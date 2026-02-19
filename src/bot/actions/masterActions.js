@@ -11,6 +11,7 @@ const masterMenu = require('../keyboards/masterMenu');
 
 module.exports = (bot) => {
     bot.action('master_panel', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {}); // Sofort quittieren
         try {
             const role = await userRepo.getUserRole(ctx.from.id);
             const text = texts.getWelcomeText(true, role);
@@ -21,6 +22,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_manage_payments', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const methods = await paymentRepo.getActivePaymentMethods();
             const keyboard = methods.map(m => ([{ 
@@ -39,6 +41,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_add_payment', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             await ctx.scene.enter('addPaymentMethodScene');
         } catch (error) {
@@ -50,7 +53,7 @@ module.exports = (bot) => {
         try {
             const payId = ctx.match[1];
             await paymentRepo.deletePaymentMethod(payId);
-            await ctx.answerCbQuery('✅ Zahlungsart gelöscht');
+            ctx.answerCbQuery('✅ Zahlungsart gelöscht').catch(() => {});
             
             const methods = await paymentRepo.getActivePaymentMethods();
             const keyboard = methods.map(m => ([{ text: `🗑 ${m.name}`, callback_data: `master_del_pay_${m.id}` }]));
@@ -64,6 +67,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_start_broadcast', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             await ctx.scene.enter('broadcastScene');
         } catch (error) {
@@ -72,6 +76,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_cleanup_blocked', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const customers = await userRepo.getAllCustomers();
             const keyboard = customers.slice(0, 15).map(c => ([{ 
@@ -90,7 +95,8 @@ module.exports = (bot) => {
         try {
             const targetId = ctx.match[1];
             await userRepo.deleteUser(targetId);
-            await ctx.answerCbQuery('✅ User-Daten gelöscht.');
+            ctx.answerCbQuery('✅ User-Daten gelöscht.').catch(() => {});
+            
             const customers = await userRepo.getAllCustomers();
             const keyboard = customers.slice(0, 15).map(c => ([{ text: `🗑 ${c.username || c.telegram_id} löschen`, callback_data: `master_del_user_${c.telegram_id}` }]));
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
@@ -101,6 +107,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_customer_overview', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const recentOrders = await orderRepo.getLatestOrders(10);
 
@@ -111,11 +118,9 @@ module.exports = (bot) => {
             }
 
             let text = '📊 *Die letzten 10 Bestellungen:*\n\n';
-            
             recentOrders.forEach((order, index) => {
                 const date = new Date(order.created_at).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
                 const username = order.users?.username ? `@${order.users.username}` : `ID: ${order.user_id}`;
-                
                 text += `${index + 1}. *${username}*\n`;
                 text += `🗓 ${date} | 💰 ${parseFloat(order.total_amount).toFixed(2)}€\n\n`;
             });
@@ -125,11 +130,12 @@ module.exports = (bot) => {
             });
         } catch (error) {
             console.error('Customer Overview Error:', error.message);
-            await ctx.answerCbQuery(texts.getGeneralError().replace('❌ ', ''), { show_alert: true });
+            ctx.answerCbQuery(texts.getGeneralError().replace('❌ ', ''), { show_alert: true }).catch(() => {});
         }
     });
 
     bot.action('master_pending_approvals', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const pending = await approvalRepo.getPendingApprovals();
             if (pending.length === 0) {
@@ -151,6 +157,7 @@ module.exports = (bot) => {
     });
 
     bot.action(/^master_view_appr_(.+)$/, isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const approvalId = ctx.match[1];
             const request = await approvalRepo.getApprovalById(approvalId);
@@ -191,7 +198,7 @@ module.exports = (bot) => {
             }
 
             await approvalRepo.updateApprovalStatus(approvalId, 'approved');
-            await ctx.answerCbQuery('✅ Anfrage genehmigt!');
+            ctx.answerCbQuery('✅ Anfrage genehmigt!').catch(() => {});
             
             await uiHelper.updateOrSend(ctx, '✅ Die Änderung wurde erfolgreich im System übernommen.', {
                 inline_keyboard: [[{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]]
@@ -204,7 +211,7 @@ module.exports = (bot) => {
     bot.action(/^master_reject_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
             await approvalRepo.updateApprovalStatus(ctx.match[1], 'rejected');
-            await ctx.answerCbQuery('❌ Abgelehnt.');
+            ctx.answerCbQuery('❌ Abgelehnt.').catch(() => {});
             
             await uiHelper.updateOrSend(ctx, '❌ Die Anfrage wurde abgelehnt und aus dem System entfernt.', { 
                 inline_keyboard: [[{ text: '🛡 Zum Master-Panel', callback_data: 'master_panel' }]]
@@ -215,6 +222,7 @@ module.exports = (bot) => {
     });
 
     bot.action('master_manage_admins', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         try {
             const admins = await userRepo.getAllAdmins();
             const keyboard = admins
@@ -234,41 +242,17 @@ module.exports = (bot) => {
     });
 
     bot.action('master_prompt_add_admin', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
         ctx.session.awaitingAdminId = true;
         await uiHelper.updateOrSend(ctx, '🆔 *Admin ernennen*\n\nBitte sende mir jetzt die **Telegram ID** des Nutzers, den du zum Admin machen möchtest.\n(Oder tippe /cancel)', {
             inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'master_manage_admins' }]]
         });
     });
 
-    bot.on('message', async (ctx, next) => {
-        if (!ctx.session || !ctx.session.awaitingAdminId || !ctx.message.text) return next();
-        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) return next();
-        
-        const targetId = ctx.message.text.trim();
-        if (!/^\d+$/.test(targetId)) {
-            return ctx.reply('⚠️ Das ist keine gültige ID. Bitte sende nur Zahlen.');
-        }
-
-        try {
-            await userRepo.updateUserRole(targetId, 'admin');
-            ctx.session.awaitingAdminId = false;
-            await ctx.reply(`✅ Nutzer ${targetId} wurde zum Admin ernannt!`);
-            const admins = await userRepo.getAllAdmins();
-            const keyboard = admins
-                .filter(a => Number(a.telegram_id) !== Number(config.MASTER_ADMIN_ID))
-                .map(a => ([{ text: `❌ ${a.username || a.telegram_id} entlassen`, callback_data: `master_fire_${a.telegram_id}` }]));
-            keyboard.push([{ text: '➕ Admin ernennen', callback_data: 'master_prompt_add_admin' }]);
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
-            await ctx.reply('Aktualisierte Admin-Liste:', { reply_markup: { inline_keyboard: keyboard } });
-        } catch (error) {
-            ctx.reply(texts.getGeneralError());
-        }
-    });
-
     bot.action(/^master_fire_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
             await userRepo.removeAdmin(ctx.match[1]);
-            await ctx.answerCbQuery('Admin entlassen.');
+            ctx.answerCbQuery('Admin entlassen.').catch(() => {});
             
             const admins = await userRepo.getAllAdmins();
             const keyboard = admins
@@ -284,10 +268,10 @@ module.exports = (bot) => {
     });
 
     bot.action('master_ack_msg', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery('Bestätigt.').catch(() => {});
         try {
             const msgText = ctx.callbackQuery.message.text || 'Information zur Kenntnis genommen.';
             await ctx.editMessageText(`✅ *Gelesen*\n~${msgText}~`, { parse_mode: 'Markdown' });
-            await ctx.answerCbQuery('Bestätigt.');
         } catch (error) {
             console.error(error.message);
         }
@@ -297,13 +281,13 @@ module.exports = (bot) => {
         try {
             const prodId = ctx.match[1];
             await productRepo.deleteProduct(prodId);
-            await ctx.answerCbQuery('Rückgängig gemacht!');
+            ctx.answerCbQuery('Rückgängig gemacht!').catch(() => {});
             
             const msgText = ctx.callbackQuery.message.text || 'Produkterstellung';
             await ctx.editMessageText(`↩️ *Rückgängig gemacht*\n~${msgText}~`, { parse_mode: 'Markdown' });
         } catch (error) {
             console.error(error.message);
-            await ctx.answerCbQuery('Fehler beim Löschen.', { show_alert: true });
+            ctx.answerCbQuery('Fehler beim Löschen.', { show_alert: true }).catch(() => {});
         }
     });
 };
