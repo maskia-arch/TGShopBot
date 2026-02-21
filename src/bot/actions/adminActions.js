@@ -1,4 +1,5 @@
 const productRepo = require('../../database/repositories/productRepo');
+const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
@@ -21,7 +22,9 @@ module.exports = (bot) => {
                     [{ text: '📦 Produkte verwalten', callback_data: 'admin_manage_products' }],
                     [{ text: '📁 Kategorien verwalten', callback_data: 'admin_manage_categories' }],
                     [{ text: '📢 Rundnachricht (Broadcast)', callback_data: 'admin_start_broadcast' }],
-                    [{ text: '👁 Kundenansicht testen', callback_data: 'shop_menu' }]
+                    [{ text: '📋 Offene Bestellungen', callback_data: 'admin_open_orders' }],
+                    [{ text: '👁 Kundenansicht testen', callback_data: 'shop_menu' }],
+                    [{ text: 'ℹ️ Befehle & Info', callback_data: 'admin_info' }]
                 ]
             };
 
@@ -43,6 +46,10 @@ module.exports = (bot) => {
             console.error('Broadcast Start Error:', error.message);
         }
     });
+
+    // ════════════════════════════════════
+    // KATEGORIEN
+    // ════════════════════════════════════
 
     bot.action('admin_manage_categories', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
@@ -80,9 +87,13 @@ module.exports = (bot) => {
             
             if (!category) return ctx.answerCbQuery('Kategorie nicht gefunden.', { show_alert: true }).catch(() => {});
 
+            // Unterkategorien laden
+            const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
+
             const keyboard = {
                 inline_keyboard: [
                     [{ text: '✏️ Namen ändern', callback_data: `admin_rename_cat_${categoryId}` }],
+                    [{ text: '📂 Unterkategorie hinzufügen', callback_data: `admin_add_subcat_${categoryId}` }],
                     [
                         { text: '🔼 Hoch', callback_data: `admin_sort_cat_up_${categoryId}` },
                         { text: '🔽 Runter', callback_data: `admin_sort_cat_down_${categoryId}` }
@@ -92,7 +103,14 @@ module.exports = (bot) => {
                 ]
             };
 
-            await uiHelper.updateOrSend(ctx, `Kategorie bearbeiten: *${category.name}*`, keyboard);
+            // Unterkategorien als Buttons hinzufügen
+            if (subcats.length > 0) {
+                subcats.forEach(sc => {
+                    keyboard.inline_keyboard.splice(-2, 0, [{ text: `📂 ${sc.name}`, callback_data: `admin_edit_subcat_${sc.id}` }]);
+                });
+            }
+
+            await uiHelper.updateOrSend(ctx, `Kategorie bearbeiten: *${category.name}*${subcats.length > 0 ? `\n\n📂 ${subcats.length} Unterkategorie(n)` : ''}`, keyboard);
         } catch (error) {
             console.error('Edit Cat Error:', error.message);
         }
@@ -149,6 +167,75 @@ module.exports = (bot) => {
         }
     });
 
+    // ════════════════════════════════════
+    // UNTERKATEGORIEN
+    // ════════════════════════════════════
+
+    bot.action(/^admin_add_subcat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const categoryId = ctx.match[1];
+            const categories = await productRepo.getActiveCategories();
+            const cat = categories.find(c => c.id == categoryId);
+            await ctx.scene.enter('addSubcategoryScene', { categoryId, categoryName: cat ? cat.name : 'Unbekannt' });
+        } catch (error) {
+            console.error('Add Subcat Error:', error.message);
+        }
+    });
+
+    bot.action(/^admin_edit_subcat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const subcatId = ctx.match[1];
+            const subcat = await subcategoryRepo.getSubcategoryById(subcatId);
+            if (!subcat) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '✏️ Umbenennen', callback_data: `admin_rename_subcat_${subcatId}` }],
+                    [{ text: '🗑 Löschen', callback_data: `admin_del_subcat_${subcatId}` }],
+                    [{ text: '🔙 Zurück', callback_data: `admin_edit_cat_${subcat.category_id}` }]
+                ]
+            };
+
+            await uiHelper.updateOrSend(ctx, `📂 Unterkategorie: *${subcat.name}*`, keyboard);
+        } catch (error) {
+            console.error('Edit Subcat Error:', error.message);
+        }
+    });
+
+    bot.action(/^admin_rename_subcat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('renameSubcategoryScene', { subcategoryId: ctx.match[1] });
+        } catch (error) {
+            console.error('Rename Subcat Error:', error.message);
+        }
+    });
+
+    bot.action(/^admin_del_subcat_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const subcatId = ctx.match[1];
+            const subcat = await subcategoryRepo.getSubcategoryById(subcatId);
+            const catId = subcat ? subcat.category_id : null;
+            
+            await subcategoryRepo.deleteSubcategory(subcatId);
+            ctx.answerCbQuery('✅ Unterkategorie gelöscht.').catch(() => {});
+
+            if (catId) {
+                ctx.update.callback_query.data = `admin_edit_cat_${catId}`;
+                return bot.handleUpdate(ctx.update);
+            }
+        } catch (error) {
+            console.error('Del Subcat Error:', error.message);
+            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    // ════════════════════════════════════
+    // PRODUKTE
+    // ════════════════════════════════════
+
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -178,6 +265,7 @@ module.exports = (bot) => {
                 let label = p.name;
                 if (!p.is_active) label = `👻 ${label}`;
                 if (p.is_out_of_stock) label = `❌ ${label}`;
+                if (p.requires_shipping) label = `🚚 ${label}`;
                 return [{ text: `${label} (${formatters.formatPrice(p.price)})`, callback_data: `admin_edit_prod_${p.id}` }];
             });
 
@@ -208,15 +296,18 @@ module.exports = (bot) => {
             
             const stockLabel = p.is_out_of_stock ? '✅ Wieder auf "Lagernd"' : '📦 Auf "Ausverkauft" setzen';
             const visLabel = p.is_active ? '👻 Unsichtbar machen' : '👁 Öffentlich schalten';
+            const shipLabel = p.requires_shipping ? '🚫 Versand deaktivieren' : '🚚 Versand aktivieren';
 
             const keyboard = {
                 inline_keyboard: [
                     [{ text: stockLabel, callback_data: `admin_toggle_stock_${p.id}` }],
                     [{ text: visLabel, callback_data: `admin_toggle_vis_${p.id}` }],
+                    [{ text: shipLabel, callback_data: `admin_toggle_ship_${p.id}` }],
                     [
                         { text: '🔼 Hoch', callback_data: `admin_sort_prod_up_${p.id}` },
                         { text: '🔽 Runter', callback_data: `admin_sort_prod_down_${p.id}` }
                     ],
+                    [{ text: '✏️ Name ändern', callback_data: `admin_rename_prod_${p.id}` }],
                     [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${p.id}` }],
                     [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${p.id}` }],
                     [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${p.id}` }],
@@ -224,9 +315,38 @@ module.exports = (bot) => {
                 ]
             };
             
-            await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${p.name}*`, keyboard, p.image_url);
+            let text = `🛠 EINSTELLUNGEN: *${p.name}*`;
+            if (p.requires_shipping) text += '\n🚚 _Versand aktiv_';
+
+            await uiHelper.updateOrSend(ctx, text, keyboard, p.image_url);
         } catch (error) {
             console.error('Edit Prod Error:', error.message);
+        }
+    });
+
+    // ── Versand Toggle ──
+    bot.action(/^admin_toggle_ship_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const productId = ctx.match[1];
+            const p = await productRepo.getProductById(productId);
+            await productRepo.toggleShipping(productId, !p.requires_shipping);
+            ctx.answerCbQuery(`🚚 Versand: ${!p.requires_shipping ? 'Aktiviert' : 'Deaktiviert'}`).catch(() => {});
+            
+            ctx.update.callback_query.data = `admin_edit_prod_${productId}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) {
+            console.error('Toggle Shipping Error:', error.message);
+            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
+        }
+    });
+
+    // ── Produkt umbenennen ──
+    bot.action(/^admin_rename_prod_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('renameProductScene', { productId: ctx.match[1] });
+        } catch (error) {
+            console.error('Rename Prod Error:', error.message);
         }
     });
 
@@ -268,27 +388,11 @@ module.exports = (bot) => {
             const p = await productRepo.getProductById(productId);
             const field = type === 'stock' ? 'is_out_of_stock' : 'is_active';
             
-            const updatedP = await productRepo.toggleProductStatus(productId, field, !p[field]);
+            await productRepo.toggleProductStatus(productId, field, !p[field]);
             ctx.answerCbQuery('✅ Status aktualisiert!').catch(() => {});
             
-            const stockLabel = updatedP.is_out_of_stock ? '✅ Wieder auf "Lagernd"' : '📦 Auf "Ausverkauft" setzen';
-            const visLabel = updatedP.is_active ? '👻 Unsichtbar machen' : '👁 Öffentlich schalten';
-
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: stockLabel, callback_data: `admin_toggle_stock_${productId}` }],
-                    [{ text: visLabel, callback_data: `admin_toggle_vis_${productId}` }],
-                    [
-                        { text: '🔼 Hoch', callback_data: `admin_sort_prod_up_${productId}` },
-                        { text: '🔽 Runter', callback_data: `admin_sort_prod_down_${productId}` }
-                    ],
-                    [{ text: '🖼 Bild ändern', callback_data: `admin_edit_img_${productId}` }],
-                    [{ text: '💰 Preis ändern (Anfrage)', callback_data: `admin_req_price_${productId}` }],
-                    [{ text: '🗑 Löschen (Anfrage)', callback_data: `admin_req_del_${productId}` }],
-                    [{ text: '🔙 Zurück zur Liste', callback_data: p.category_id ? `admin_prod_cat_${p.category_id}` : 'admin_prod_cat_none' }]
-                ]
-            };
-            await uiHelper.updateOrSend(ctx, `🛠 EINSTELLUNGEN: *${p.name}*`, keyboard, p.image_url);
+            ctx.update.callback_query.data = `admin_edit_prod_${productId}`;
+            return bot.handleUpdate(ctx.update);
         } catch (error) {
             console.error('Toggle Status Error:', error.message);
         }

@@ -29,10 +29,12 @@ const cancelAndLeave = async (ctx) => {
 
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
+    // Step 0: Name
     async (ctx) => {
         ctx.wizard.state.productData = {};
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productData.categoryId = ctx.scene.state.categoryId || null;
+        ctx.wizard.state.productData.subcategoryId = ctx.scene.state.subcategoryId || null;
         
         ctx.wizard.state.lastQuestion = '📦 *Neues Produkt*\nBitte sende den Namen des Produkts:';
         
@@ -44,6 +46,7 @@ const addProductScene = new Scenes.WizardScene(
         
         return ctx.wizard.next();
     },
+    // Step 1: Name empfangen → Beschreibung
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
@@ -73,6 +76,7 @@ const addProductScene = new Scenes.WizardScene(
         
         return ctx.wizard.next();
     },
+    // Step 2: Beschreibung → Preis
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
@@ -102,6 +106,7 @@ const addProductScene = new Scenes.WizardScene(
         
         return ctx.wizard.next();
     },
+    // Step 3: Preis → Stückpreis
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
@@ -142,6 +147,7 @@ const addProductScene = new Scenes.WizardScene(
         
         return ctx.wizard.next();
     },
+    // Step 4: Stückpreis → Versand
     async (ctx) => {
         if (!ctx.message || !ctx.message.text) return;
 
@@ -155,8 +161,7 @@ const addProductScene = new Scenes.WizardScene(
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
-                    one_time_keyboard: true,
-                    resize_keyboard: true
+                    one_time_keyboard: true, resize_keyboard: true
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
@@ -164,6 +169,41 @@ const addProductScene = new Scenes.WizardScene(
         }
 
         ctx.wizard.state.productData.isUnitPrice = input.toLowerCase() === 'ja';
+        ctx.wizard.state.lastQuestion = 'Erfordert dieses Produkt einen Versand (Adressabfrage)?';
+        
+        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
+            reply_markup: {
+                keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
+                one_time_keyboard: true,
+                resize_keyboard: true
+            }
+        });
+        ctx.wizard.state.messagesToDelete.push(msg.message_id);
+        
+        return ctx.wizard.next();
+    },
+    // Step 5: Versand → Bild
+    async (ctx) => {
+        if (!ctx.message || !ctx.message.text) return;
+
+        const input = ctx.message.text.trim();
+        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
+
+        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
+
+        if (input.startsWith('/')) {
+            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
+                    one_time_keyboard: true, resize_keyboard: true
+                }
+            });
+            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
+            return;
+        }
+
+        ctx.wizard.state.productData.requiresShipping = input.toLowerCase() === 'ja';
         ctx.wizard.state.lastQuestion = 'Bitte sende ein Foto oder tippe "Überspringen":';
         
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
@@ -177,6 +217,7 @@ const addProductScene = new Scenes.WizardScene(
         
         return ctx.wizard.next();
     },
+    // Step 6: Bild → Speichern
     async (ctx) => {
         if (ctx.message) ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
         
@@ -188,8 +229,7 @@ const addProductScene = new Scenes.WizardScene(
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Überspringen' }], [{ text: '❌ Abbrechen' }]],
-                    one_time_keyboard: true,
-                    resize_keyboard: true
+                    one_time_keyboard: true, resize_keyboard: true
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
@@ -209,7 +249,8 @@ const addProductScene = new Scenes.WizardScene(
                 console.error('Image Upload Error:', error.message);
             }
         } else {
-            await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
+            const statusMsg = await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
+            ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
         }
 
         ctx.wizard.state.productData.imageUrl = finalImageUrl;
@@ -227,17 +268,19 @@ const addProductScene = new Scenes.WizardScene(
                 if (cat) catName = cat.name;
             }
 
+            const shippingHint = ctx.wizard.state.productData.requiresShipping ? ' 🚚' : '';
+
             if (createdId && Number(ctx.from.id) !== Number(config.MASTER_ADMIN_ID)) {
                 notificationService.notifyMasterNewProduct({
                     adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
-                    productName: ctx.wizard.state.productData.name,
+                    productName: ctx.wizard.state.productData.name + shippingHint,
                     categoryName: catName,
                     time: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
                     productId: createdId
                 }).catch(() => {});
             }
             
-            await ctx.reply(`✅ Produkt "${ctx.wizard.state.productData.name}" erstellt!`);
+            await ctx.reply(`✅ Produkt "${ctx.wizard.state.productData.name}" erstellt!${shippingHint ? '\n📦 Versand aktiv' : ''}`);
 
             ctx.update.callback_query = { 
                 data: ctx.wizard.state.productData.categoryId ? `admin_prod_cat_${ctx.wizard.state.productData.categoryId}` : 'admin_prod_cat_none', 

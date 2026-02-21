@@ -1,4 +1,5 @@
 const userRepo = require('../../database/repositories/userRepo');
+const orderRepo = require('../../database/repositories/orderRepo');
 const masterMenu = require('../keyboards/masterMenu');
 const adminMenu = require('../keyboards/adminMenu');
 const customerMenu = require('../keyboards/customerMenu');
@@ -14,21 +15,33 @@ module.exports = (bot) => {
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
+            // Ban-Check (Master wird nie gebannt)
+            if (!isMaster) {
+                const banned = await userRepo.isUserBanned(userId);
+                if (banned) {
+                    return ctx.reply(texts.getBannedMessage()).catch(() => {});
+                }
+            }
+
             await userRepo.upsertUser(userId, username);
             const role = await userRepo.getUserRole(userId);
 
             const text = texts.getWelcomeText(isMaster, role);
-            let keyboard = customerMenu();
+            let keyboard;
 
             if (isMaster) {
                 keyboard = masterMenu();
             } else if (role === 'admin') {
                 keyboard = adminMenu();
+            } else {
+                // Prüfen ob der Kunde aktive Bestellungen hat
+                const hasOrders = await orderRepo.hasActiveOrders(userId);
+                keyboard = customerMenu(hasOrders);
             }
 
-            const sentMessage = await ctx.reply(text, { 
+            const sentMessage = await ctx.reply(text, {
                 reply_markup: keyboard,
-                parse_mode: 'Markdown' 
+                parse_mode: 'Markdown'
             });
 
             ctx.deleteMessage().catch(() => {});

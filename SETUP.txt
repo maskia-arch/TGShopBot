@@ -1,8 +1,8 @@
 =========================================
       t.me/autoacts - Shop Bot Setup
 =========================================
-Autor: t.me/autoacts
-Version: 0.2.1
+Autor:   t.me/autoacts
+Version: 0.3.1 (Update von 0.2.1)
 
 --- 1. ENVIRONMENT VARIABLES (Render.com) ---
 Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
@@ -11,46 +11,67 @@ TELEGRAM_BOT_TOKEN = (Dein Bot Token vom @BotFather)
 SUPABASE_URL       = (Deine Supabase Projekt URL)
 SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Service Role nutzen!)
 MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Absolute Systemgewalt)
-VERSION            = 0.2.1
+VERSION            = 0.3.1
 PORT               = 10000
 
---- 2. SUPABASE SQL SETUP ---
+--- 2. SUPABASE SQL SETUP (Full Schema v0.3.1) ---
 Führe diese Befehle im Supabase SQL Editor aus. 
-Hinweis: Falls Tabellen aus Vorversionen existieren, werden nur die neuen Spalten/Tabellen ergänzt.
+Dieses Skript erstellt die komplette Struktur inklusive Subkategorien, Order-Logik und Ban-System.
 
--- Tabelle: Users (Erweitert für v0.2.1)
+-- Erweiterungen aktivieren
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Sequenz für Order-IDs
+CREATE SEQUENCE IF NOT EXISTS order_number_seq START WITH 10001;
+
+-- Tabelle: Users (v0.3.1 inkl. Ban-System)
 CREATE TABLE IF NOT EXISTS users (
     telegram_id BIGINT PRIMARY KEY,
     username TEXT,
     role TEXT DEFAULT 'customer', -- 'master', 'admin', 'customer'
+    is_banned BOOLEAN DEFAULT false,
+    last_ping_at TIMESTAMPTZ,
+    last_contact_at TIMESTAMPTZ,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Tabelle: Kategorien
 CREATE TABLE IF NOT EXISTS categories (
-    id SERIAL PRIMARY KEY,
+    id SERIAL PRIMARY KEY, -- Hinweis: Falls UUID gewünscht, hier manuell anpassen
     name TEXT NOT NULL,
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Tabelle: Produkte (Optimiert für v0.2.1 Lagerlogik)
+-- Tabelle: Subkategorien (Neu in v0.3.0)
+CREATE TABLE IF NOT EXISTS subcategories (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tabelle: Produkte (v0.3.1 inkl. Versand-Flag & Subkategorien)
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL, 
+    subcategory_id UUID REFERENCES subcategories(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     description TEXT,
     price DECIMAL(10,2) NOT NULL,
     is_unit_price BOOLEAN DEFAULT FALSE,
     is_out_of_stock BOOLEAN DEFAULT FALSE,
+    requires_shipping BOOLEAN DEFAULT false, -- Neu in v0.3.1
     image_url TEXT,
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Tabelle: Zahlungsarten (Mit Adress-Support)
+-- Tabelle: Zahlungsarten
 CREATE TABLE IF NOT EXISTS payment_methods (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    wallet_address TEXT, -- Crypto Wallets, PayPal Email, etc.
+    wallet_address TEXT, 
     is_active BOOLEAN DEFAULT TRUE
 );
 
@@ -62,41 +83,83 @@ CREATE TABLE IF NOT EXISTS carts (
     quantity INTEGER DEFAULT 1
 );
 
--- Tabelle: Bestellungen (Neu ergänzt für v0.2.1)
+-- Tabelle: Bestellungen (v0.3.1 inkl. Order-ID Workflow & Admin Notes)
 CREATE TABLE IF NOT EXISTS orders (
     id SERIAL PRIMARY KEY,
+    order_id TEXT UNIQUE NOT NULL, -- Automatisch via Trigger
     user_id BIGINT REFERENCES users(telegram_id) ON DELETE CASCADE,
     total_amount DECIMAL(10,2) NOT NULL,
+    status TEXT DEFAULT 'offen',
+    shipping_link TEXT,
+    payment_link TEXT,
+    payment_method_id UUID,
+    payment_method_name TEXT DEFAULT 'Nicht angegeben',
+    admin_notes JSONB DEFAULT '[]'::jsonb, -- Neu in v0.3.1
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Tabelle: Pending Bans (v0.3.1 Master-Bestätigung)
+CREATE TABLE IF NOT EXISTS pending_bans (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    banned_by BIGINT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '48 hours'),
+    status TEXT DEFAULT 'pending'
+);
+
+-- Tabelle: Ausstehende Freigaben (v0.2.1 Workflow)
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id SERIAL PRIMARY KEY,
+    action_type TEXT NOT NULL, 
+    requested_by BIGINT REFERENCES users(telegram_id),
+    target_id INTEGER, 
+    new_value TEXT,    
     status TEXT DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Tabelle: Ausstehende Freigaben (Master Approval Workflow)
-CREATE TABLE IF NOT EXISTS pending_approvals (
-    id SERIAL PRIMARY KEY,
-    action_type TEXT NOT NULL, -- 'DELETE', 'PRICE_CHANGE'
-    requested_by BIGINT REFERENCES users(telegram_id),
-    target_id INTEGER, 
-    new_value TEXT,    
-    status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Tabelle: Sessions (Optional, falls persistente Sessions gewünscht sind)
--- Falls Telegraf-Session-Memory genutzt wird, ist dies nur zur Info.
+-- Tabelle: Sessions
 CREATE TABLE IF NOT EXISTS bot_sessions (
     id BIGINT PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
     session_data JSONB DEFAULT '{}'
 );
 
---- 3. PERFORMANCE & CLEANUP INDEXE ---
-CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
-CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
-CREATE INDEX IF NOT EXISTS idx_approvals_status ON pending_approvals(status);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+--- 3. AUTOMATISIERUNG & TRIGGER ---
 
---- 4. INITIALISIERUNG ---
--- Optional: Falls du direkt eine Zahlungsart einfügen willst:
--- INSERT INTO payment_methods (name, wallet_address) VALUES ('Bitcoin', 'DEINE_BTC_ADRESSE');
+-- Funktion: Automatische Order-ID Generation
+CREATE OR REPLACE FUNCTION generate_order_id()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.order_id IS NULL THEN
+        NEW.order_id := 'ORD-' || LPAD(nextval('order_number_seq')::TEXT, 5, '0');
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger für neue Bestellungen
+DROP TRIGGER IF EXISTS trigger_generate_order_id ON orders;
+CREATE TRIGGER trigger_generate_order_id
+    BEFORE INSERT ON orders
+    FOR EACH ROW
+    EXECUTE FUNCTION generate_order_id();
+
+--- 4. PERFORMANCE INDEXE ---
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_subcategory ON products(subcategory_id);
+CREATE INDEX IF NOT EXISTS idx_subcategories_category ON subcategories(category_id);
+CREATE INDEX IF NOT EXISTS idx_orders_order_id ON orders(order_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_banned ON users(is_banned);
+CREATE INDEX IF NOT EXISTS idx_pending_bans_status ON pending_bans(status);
+
+--- 5. RLS (Optional/Sicherheit) ---
+ALTER TABLE subcategories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "subcategories_all" ON subcategories FOR ALL USING (true) WITH CHECK (true);
+ALTER TABLE pending_bans ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "pending_bans_all" ON pending_bans FOR ALL USING (true) WITH CHECK (true);
 
 =========================================
