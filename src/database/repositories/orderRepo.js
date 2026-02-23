@@ -1,7 +1,7 @@
 const supabase = require('../supabaseClient');
 
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
-    const { shippingLink, paymentLink, paymentMethodId, paymentMethodName } = options;
+    const { shippingLink, paymentLink, paymentMethodId, paymentMethodName, deliveryMethod } = options;
     const { data, error } = await supabase
         .from('orders')
         .insert([{
@@ -13,6 +13,7 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             payment_link: paymentLink || null,
             payment_method_id: paymentMethodId || null,
             payment_method_name: paymentMethodName || 'Nicht angegeben',
+            delivery_method: deliveryMethod || null,
             admin_notes: []
         }])
         .select('id, order_id, status');
@@ -21,12 +22,12 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
 };
 
 const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
-    shipping_link, payment_link, payment_method_name, admin_notes, created_at,
+    shipping_link, payment_link, payment_method_name, delivery_method, admin_notes, created_at,
     users:user_id ( username, telegram_id )`;
 
 const getOrderByOrderId = async (orderId) => {
     let searchId = orderId.toString().trim().toUpperCase();
-    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.padStart(5, '0');
+    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.replace(/^0+/, '').padStart(5, '0');
     const { data, error } = await supabase.from('orders').select(SELECT_FULL).eq('order_id', searchId).maybeSingle();
     if (error) throw error;
     return data;
@@ -42,18 +43,14 @@ const updateOrderStatus = async (orderId, newStatus) => {
     const { data, error } = await supabase
         .from('orders').update({ status: newStatus }).eq('order_id', orderId).select('id, order_id, status, user_id');
     if (error) throw error;
-    return data[0];
+    return data && data[0] ? data[0] : null;
 };
 
 const addAdminNote = async (orderId, authorName, noteText) => {
     const order = await getOrderByOrderId(orderId);
     if (!order) return null;
     const notes = order.admin_notes || [];
-    notes.push({
-        author: authorName,
-        text: noteText,
-        date: new Date().toISOString()
-    });
+    notes.push({ author: authorName, text: noteText, date: new Date().toISOString() });
     const { data, error } = await supabase
         .from('orders').update({ admin_notes: notes }).eq('order_id', orderId).select('order_id, admin_notes');
     if (error) throw error;
@@ -62,7 +59,7 @@ const addAdminNote = async (orderId, authorName, noteText) => {
 
 const deleteOrder = async (orderId) => {
     let searchId = orderId.toString().trim().toUpperCase();
-    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.padStart(5, '0');
+    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.replace(/^0+/, '').padStart(5, '0');
     const { error } = await supabase.from('orders').delete().eq('order_id', searchId);
     if (error) throw error;
     return true;
@@ -77,7 +74,7 @@ const deleteAllOrders = async () => {
 const getOrdersByUser = async (userId) => {
     const { data, error } = await supabase
         .from('orders')
-        .select('id, order_id, total_amount, status, details, payment_method_name, created_at')
+        .select('id, order_id, total_amount, status, details, payment_method_name, delivery_method, created_at')
         .eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
     if (error) throw error;
     return data || [];
@@ -86,7 +83,7 @@ const getOrdersByUser = async (userId) => {
 const getActiveOrdersByUser = async (userId) => {
     const { data, error } = await supabase
         .from('orders')
-        .select('id, order_id, total_amount, status, details, payment_method_name, created_at')
+        .select('id, order_id, total_amount, status, details, payment_method_name, delivery_method, created_at')
         .eq('user_id', userId).in('status', ['offen', 'in_bearbeitung', 'versand'])
         .order('created_at', { ascending: false });
     if (error) throw error;

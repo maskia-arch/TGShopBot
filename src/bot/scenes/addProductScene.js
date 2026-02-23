@@ -1,300 +1,214 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
-const { uploadToDezentral } = require('../../utils/imageUploader');
+const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
+const imageUploader = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
-const notificationService = require('../../services/notificationService');
-const config = require('../../config');
 const texts = require('../../utils/texts');
-
-const cleanup = async (ctx) => {
-    if (ctx.wizard.state.messagesToDelete) {
-        for (const msgId of ctx.wizard.state.messagesToDelete) {
-            await ctx.telegram.deleteMessage(ctx.chat.id, msgId).catch(() => {});
-        }
-        ctx.wizard.state.messagesToDelete = [];
-    }
-};
-
-const cancelAndLeave = async (ctx) => {
-    await cleanup(ctx);
-    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
-    
-    ctx.update.callback_query = { 
-        data: ctx.wizard.state.productData.categoryId ? `admin_prod_cat_${ctx.wizard.state.productData.categoryId}` : 'admin_manage_products', 
-        from: ctx.from 
-    };
-    
-    return ctx.scene.leave();
-};
+const config = require('../../config');
+const notificationService = require('../../services/notificationService');
 
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
-    // Step 0: Name
+
+    // ── STEP 0: Produktname ──
     async (ctx) => {
-        ctx.wizard.state.productData = {};
-        ctx.wizard.state.messagesToDelete = [];
-        ctx.wizard.state.productData.categoryId = ctx.scene.state.categoryId || null;
-        ctx.wizard.state.productData.subcategoryId = ctx.scene.state.subcategoryId || null;
-        
-        ctx.wizard.state.lastQuestion = '📦 *Neues Produkt*\nBitte sende den Namen des Produkts:';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]] }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 1: Name empfangen → Beschreibung
-    async (ctx) => {
-        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
-        }
-        if (!ctx.message || !ctx.message.text) return;
+        ctx.wizard.state.productData = {
+            categoryId: ctx.scene.state?.categoryId || null,
+            subcategoryId: null,
+            deliveryOption: 'none'
+        };
 
-        const input = ctx.message.text.trim();
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        ctx.wizard.state.productData.name = input;
-        ctx.wizard.state.lastQuestion = 'Bitte sende die Beschreibung:';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]] }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 2: Beschreibung → Preis
-    async (ctx) => {
-        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
-        }
-        if (!ctx.message || !ctx.message.text) return;
-
-        const input = ctx.message.text.trim();
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        ctx.wizard.state.productData.description = input;
-        ctx.wizard.state.lastQuestion = 'Bitte sende den Preis in Euro (z.B. 10.50):';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]] }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 3: Preis → Stückpreis
-    async (ctx) => {
-        if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
-            return cancelAndLeave(ctx);
-        }
-        if (!ctx.message || !ctx.message.text) return;
-
-        const input = ctx.message.text.trim();
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Vorgang abbrechen', callback_data: 'cancel_scene' }]] }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        const price = parseFloat(input.replace(',', '.'));
-        if (isNaN(price)) {
-            const msg = await ctx.reply('⚠️ Ungültig. Bitte sende eine Zahl:');
-            ctx.wizard.state.messagesToDelete.push(msg.message_id);
-            return;
-        }
-        
-        ctx.wizard.state.productData.price = price;
-        ctx.wizard.state.lastQuestion = 'Ist dies ein Preis pro Stück?';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            reply_markup: {
-                keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
-                one_time_keyboard: true,
-                resize_keyboard: true
-            }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 4: Stückpreis → Versand
-    async (ctx) => {
-        if (!ctx.message || !ctx.message.text) return;
-
-        const input = ctx.message.text.trim();
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
-
-        if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
-                    one_time_keyboard: true, resize_keyboard: true
-                }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        ctx.wizard.state.productData.isUnitPrice = input.toLowerCase() === 'ja';
-        ctx.wizard.state.lastQuestion = 'Erfordert dieses Produkt einen Versand (Adressabfrage)?';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            reply_markup: {
-                keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
-                one_time_keyboard: true,
-                resize_keyboard: true
-            }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 5: Versand → Bild
-    async (ctx) => {
-        if (!ctx.message || !ctx.message.text) return;
-
-        const input = ctx.message.text.trim();
-        ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-
-        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
-
-        if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [[{ text: 'Ja' }, { text: 'Nein' }], [{ text: '❌ Abbrechen' }]],
-                    one_time_keyboard: true, resize_keyboard: true
-                }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        ctx.wizard.state.productData.requiresShipping = input.toLowerCase() === 'ja';
-        ctx.wizard.state.lastQuestion = 'Bitte sende ein Foto oder tippe "Überspringen":';
-        
-        const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
-            reply_markup: {
-                keyboard: [[{ text: 'Überspringen' }], [{ text: '❌ Abbrechen' }]],
-                one_time_keyboard: true,
-                resize_keyboard: true
-            }
-        });
-        ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
-        return ctx.wizard.next();
-    },
-    // Step 6: Bild → Speichern
-    async (ctx) => {
-        if (ctx.message) ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
-        
-        const input = ctx.message?.text;
-        if (input === '❌ Abbrechen') return cancelAndLeave(ctx);
-
-        if (input && input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    keyboard: [[{ text: 'Überspringen' }], [{ text: '❌ Abbrechen' }]],
-                    one_time_keyboard: true, resize_keyboard: true
-                }
-            });
-            ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
-            return;
-        }
-
-        let finalImageUrl = null;
-
-        if (ctx.message && ctx.message.photo) {
+        // Prüfe Unterkategorien
+        if (ctx.wizard.state.productData.categoryId) {
             try {
-                const photo = ctx.message.photo[ctx.message.photo.length - 1];
-                const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-                const statusMsg = await ctx.reply('⏳ Bild wird verarbeitet...', { reply_markup: { remove_keyboard: true } });
-                ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
-                finalImageUrl = await uploadToDezentral(fileLink.href);
-            } catch (error) {
-                console.error('Image Upload Error:', error.message);
-            }
-        } else {
-            const statusMsg = await ctx.reply('⏳ Speichere...', { reply_markup: { remove_keyboard: true } });
-            ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
+                const subcats = await subcategoryRepo.getSubcategoriesByCategory(ctx.wizard.state.productData.categoryId);
+                if (subcats && subcats.length > 0) {
+                    ctx.wizard.state.subcats = subcats;
+                    const keyboard = subcats.map(sc => ([{
+                        text: sc.name, callback_data: `subcat_${sc.id}`
+                    }]));
+                    keyboard.push([{ text: 'Ohne Unterkategorie', callback_data: 'subcat_none' }]);
+                    keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
+
+                    await ctx.reply('📂 *Unterkategorie wählen:*', {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: keyboard }
+                    });
+                    return ctx.wizard.next();
+                }
+            } catch (e) {}
         }
 
-        ctx.wizard.state.productData.imageUrl = finalImageUrl;
-        
-        try {
-            const newProduct = await productRepo.addProduct(ctx.wizard.state.productData);
-            await cleanup(ctx); 
-            
-            const createdId = (newProduct && newProduct.id) || (newProduct && newProduct[0] && newProduct[0].id);
-            
-            let catName = 'Kategorielos';
-            if (ctx.wizard.state.productData.categoryId) {
-                const categories = await productRepo.getActiveCategories();
-                const cat = categories.find(c => c.id == ctx.wizard.state.productData.categoryId);
-                if (cat) catName = cat.name;
+        // Kein Subcategory-Step → direkt Name abfragen
+        await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+        });
+        ctx.wizard.state.step = 'name';
+        return ctx.wizard.next();
+    },
+
+    // ── STEP 1: Unterkategorie / Name ──
+    async (ctx) => {
+        // Callback: Unterkategorie gewählt
+        if (ctx.callbackQuery) {
+            const data = ctx.callbackQuery.data;
+            ctx.answerCbQuery().catch(() => {});
+
+            if (data === 'cancel_add') {
+                await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+                return ctx.scene.leave();
             }
 
-            const shippingHint = ctx.wizard.state.productData.requiresShipping ? ' 🚚' : '';
+            if (data.startsWith('subcat_')) {
+                const subcatId = data.replace('subcat_', '');
+                ctx.wizard.state.productData.subcategoryId = subcatId === 'none' ? null : subcatId;
 
-            if (createdId && Number(ctx.from.id) !== Number(config.MASTER_ADMIN_ID)) {
-                notificationService.notifyMasterNewProduct({
-                    adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
-                    productName: ctx.wizard.state.productData.name + shippingHint,
-                    categoryName: catName,
-                    time: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }),
-                    productId: createdId
-                }).catch(() => {});
+                await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                });
+                ctx.wizard.state.step = 'name';
+                return;
             }
-            
-            await ctx.reply(`✅ Produkt "${ctx.wizard.state.productData.name}" erstellt!${shippingHint ? '\n📦 Versand aktiv' : ''}`);
+        }
 
-            ctx.update.callback_query = { 
-                data: ctx.wizard.state.productData.categoryId ? `admin_prod_cat_${ctx.wizard.state.productData.categoryId}` : 'admin_prod_cat_none', 
-                from: ctx.from 
+        // Text: Name empfangen
+        if (ctx.wizard.state.step === 'name' && ctx.message && ctx.message.text) {
+            const name = ctx.message.text.trim();
+            if (name.startsWith('/')) return;
+            ctx.wizard.state.productData.name = name;
+            ctx.wizard.state.step = 'description';
+
+            await ctx.reply('📝 Beschreibung eingeben (oder "skip"):',{
+                reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_desc' }]] }
+            });
+            return;
+        }
+
+        // Text: Beschreibung
+        if (ctx.wizard.state.step === 'description') {
+            if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_desc') {
+                ctx.answerCbQuery().catch(() => {});
+                ctx.wizard.state.productData.description = null;
+            } else if (ctx.message && ctx.message.text) {
+                ctx.wizard.state.productData.description = ctx.message.text.trim();
+            } else return;
+
+            ctx.wizard.state.step = 'price';
+            await ctx.reply('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' });
+            return;
+        }
+
+        // Text: Preis
+        if (ctx.wizard.state.step === 'price' && ctx.message && ctx.message.text) {
+            const price = parseFloat(ctx.message.text.replace(',', '.'));
+            if (isNaN(price) || price <= 0) {
+                return ctx.reply('⚠️ Ungültiger Preis. Bitte eine Zahl eingeben:');
+            }
+            ctx.wizard.state.productData.price = price;
+            ctx.wizard.state.step = 'image';
+
+            await ctx.reply('🖼 Produktbild senden oder überspringen:', {
+                reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_img' }]] }
+            });
+            return;
+        }
+
+        // Bild
+        if (ctx.wizard.state.step === 'image') {
+            if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_img') {
+                ctx.answerCbQuery().catch(() => {});
+                ctx.wizard.state.productData.imageUrl = null;
+            } else if (ctx.message && ctx.message.photo) {
+                const photo = ctx.message.photo[ctx.message.photo.length - 1];
+                try {
+                    const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+                    ctx.wizard.state.productData.imageUrl = fileLink.href;
+                } catch (e) {
+                    ctx.wizard.state.productData.imageUrl = null;
+                }
+            } else return;
+
+            // Lieferoption abfragen
+            ctx.wizard.state.step = 'delivery';
+            await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
+                        [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
+                        [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
+                        [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+                    ]
+                }
+            });
+            return;
+        }
+
+        // Lieferoption
+        if (ctx.wizard.state.step === 'delivery' && ctx.callbackQuery) {
+            const data = ctx.callbackQuery.data;
+            ctx.answerCbQuery().catch(() => {});
+
+            const deliveryMap = {
+                'delivery_none': 'none',
+                'delivery_shipping': 'shipping',
+                'delivery_pickup': 'pickup',
+                'delivery_both': 'both'
             };
-            
-            return ctx.scene.leave();
-        } catch (error) {
-            console.error('AddProduct Error:', error.message);
-            await cleanup(ctx);
-            await uiHelper.sendTemporary(ctx, texts.getGeneralError(), 3);
-            return ctx.scene.leave();
+
+            if (deliveryMap[data]) {
+                ctx.wizard.state.productData.deliveryOption = deliveryMap[data];
+
+                // Produkt erstellen
+                try {
+                    const pd = ctx.wizard.state.productData;
+                    const result = await productRepo.addProduct(pd);
+
+                    const deliveryLabel = texts.getDeliveryLabel(pd.deliveryOption);
+                    let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
+
+                    await ctx.reply(successText, {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+                        }
+                    });
+
+                    // Master benachrichtigen
+                    if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
+                        notificationService.notifyAdminsNewProduct({
+                            adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
+                            productName: pd.name,
+                            categoryName: pd.categoryId || 'Keine',
+                            productId: result[0].id,
+                            time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
+                        }).catch(() => {});
+                    }
+                } catch (error) {
+                    console.error('Add Product Error:', error.message);
+                    await ctx.reply(texts.getGeneralError());
+                }
+
+                return ctx.scene.leave();
+            }
         }
     }
 );
+
+addProductScene.action('cancel_add', async (ctx) => {
+    ctx.answerCbQuery('Abgebrochen').catch(() => {});
+    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+    return ctx.scene.leave();
+});
+
+addProductScene.action('skip_desc', async (ctx) => {
+    // Handled in step
+});
+
+addProductScene.action('skip_img', async (ctx) => {
+    // Handled in step
+});
 
 module.exports = addProductScene;
