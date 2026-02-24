@@ -11,10 +11,7 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
             if (imageUrl) {
                 if (isCurrentlyPhoto) {
                     return await ctx.editMessageMedia({
-                        type: 'photo',
-                        media: imageUrl,
-                        caption: text,
-                        parse_mode: 'Markdown'
+                        type: 'photo', media: imageUrl, caption: text, parse_mode: 'Markdown'
                     }, { reply_markup: replyMarkup });
                 } else {
                     await ctx.deleteMessage().catch(() => {});
@@ -52,12 +49,8 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
 
 const sendTemporary = async (ctx, text, seconds = 3) => {
     try {
-        if (ctx.message) {
-            ctx.deleteMessage().catch(() => {});
-        }
-
+        if (ctx.message) ctx.deleteMessage().catch(() => {});
         const msg = await ctx.reply(`✨ ${text}`);
-        
         setTimeout(() => {
             ctx.telegram.deleteMessage(ctx.chat.id, msg.message_id).catch(() => {});
         }, seconds * 1000);
@@ -66,7 +59,4 @@ const sendTemporary = async (ctx, text, seconds = 3) => {
     }
 };
 
-module.exports = {
-    updateOrSend,
-    sendTemporary
-};
+module.exports = { updateOrSend, sendTemporary };

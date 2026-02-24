@@ -8,7 +8,8 @@ module.exports = {
         `1️⃣ *Shop durchsuchen:* Wähle eine Kategorie und ein Produkt.\n` +
         `2️⃣ *In den Warenkorb:* Bestimme die Menge und lege es ab.\n` +
         `3️⃣ *Bestellung aufgeben:* Gehe zum Warenkorb und wähle die Zahlungsart.\n` +
-        `4️⃣ *Warten:* Wir bestätigen den Erhalt umgehend!\n\n` +
+        `4️⃣ *Bezahlen:* Überweise den Betrag und bestätige mit der TX-ID.\n` +
+        `5️⃣ *Warten:* Wir bestätigen den Erhalt umgehend!\n\n` +
         `Bei Fragen wende dich an den Support.`,
 
     getWelcomeText: (isMaster, role) => {
@@ -22,16 +23,6 @@ module.exports = {
     getOutOfStockError: () => `⚠️ Dieses Produkt ist momentan leider ausverkauft.`,
     getCheckoutSelectPayment: () => `💳 *Bezahlung*\nBitte wähle deine bevorzugte Zahlungsart aus:`,
 
-    getCheckoutFinalInstructions: (methodName, address, total) => {
-        let text = `🏁 *Bestellung fast abgeschlossen*\n\nGesamtbetrag: *${total}*\nZahlungsart: *${methodName}*\n\n`;
-        if (address) {
-            text += `Bitte sende den Betrag an folgende Adresse:\n\n\`${address}\`\n\n_(Tippe auf die Adresse, um sie zu kopieren)_`;
-        } else {
-            text += `Bitte folge den Anweisungen für: *${methodName}*`;
-        }
-        return text;
-    },
-
     // ── Bestellbenachrichtigungen ──
 
     getAdminNewOrderNotify: (data) => {
@@ -43,8 +34,18 @@ module.exports = {
         if (data.deliveryMethod === 'shipping') text += `🚚 Lieferung: Versand\n`;
         else if (data.deliveryMethod === 'pickup') text += `🏪 Lieferung: Abholung\n`;
         if (data.shippingLink) text += `📦 Adresse: [Privnote öffnen](${data.shippingLink})\n`;
+        text += `\n📦 Status: *Offen* – Warte auf Zahlung`;
         return text;
     },
+
+    getAdminTxIdNotify: (data) =>
+        `💸 *ZAHLUNG EINGEGANGEN?*\n\n` +
+        `📋 Order: /orderid ${data.orderId}\n` +
+        `👤 Kunde: ${data.username} (ID: ${data.userId})\n` +
+        `💰 Betrag: ${data.total}\n` +
+        `💳 Methode: ${data.paymentName}\n` +
+        `🔑 TX-ID: \`${data.txId}\`\n\n` +
+        `⚠️ Bitte Zahlungseingang prüfen und Status aktualisieren.`,
 
     getAdminNewProductNotify: (data) =>
         `🔔 *Neues Produkt erstellt*\n\n` +
@@ -65,24 +66,59 @@ module.exports = {
 
     // ── Receipts & Status ──
 
+    getCustomerInvoice: (data) => {
+        let text = `🧾 *Rechnung / Bestellbestätigung*\n\n`;
+        text += `📋 *Order-ID:* \`${data.orderId}\`\n`;
+        text += `💰 *Offener Betrag:* ${data.total}€\n`;
+        text += `💳 *Zahlungsart:* ${data.paymentName}\n`;
+        if (data.walletAddress) {
+            text += `\n📋 *Zahlungsadresse:*\n\`${data.walletAddress}\`\n_(Tippe zum Kopieren)_\n`;
+        }
+        if (data.deliveryMethod === 'shipping') text += `\n🚚 *Lieferung:* Versand`;
+        else if (data.deliveryMethod === 'pickup') text += `\n🏪 *Lieferung:* Abholung`;
+        text += `\n\n⚠️ *Bitte überweise den offenen Betrag und bestätige anschließend deine Zahlung.*`;
+        return text;
+    },
+
+    getTxIdPrompt: () =>
+        `🔑 *TX-ID / Zahlungsbeleg*\n\nBitte sende jetzt deine Transaktions-ID oder Zahlungsreferenz als Text:`,
+
+    getTxIdConfirmed: (orderId) =>
+        `✅ *Zahlung übermittelt!*\n\n📋 Order: \`${orderId}\`\n\nDeine TX-ID wurde gespeichert. Der Verkäufer prüft den Zahlungseingang.\n\n📦 Status: *Pending* – Warte auf Bestätigung`,
+
     getOrderReceipt: (data) => {
-        let text = `🧾 *Bestellbestätigung*\n\n📋 *Order-ID:* /orderid ${data.orderId}\n` +
+        let text = `🧾 *Bestellbestätigung*\n\n📋 *Order-ID:* \`${data.orderId}\`\n` +
             `💰 *Betrag:* ${data.total}€\n💳 *Zahlungsart:* ${data.paymentName}\n📦 *Status:* ${data.status || 'Offen'}\n`;
         if (data.deliveryMethod === 'shipping') text += `🚚 *Lieferung:* Versand\n`;
         else if (data.deliveryMethod === 'pickup') text += `🏪 *Lieferung:* Abholung\n`;
-        text += `\nDeine Bestellung wird bearbeitet.`;
         return text;
     },
 
     getStatusUpdateText: (orderId, newStatus) => {
         const label = module.exports.getStatusLabel(newStatus);
-        return `🔔 *Status-Update*\n\nDeine Bestellung /orderid ${orderId} wurde aktualisiert:\n\n*Neuer Status:* ${label}`;
+        return `🔔 *Status-Update*\n\nDeine Bestellung \`${orderId}\` wurde aktualisiert:\n\n*Neuer Status:* ${label}`;
     },
 
     getStatusLabel: (status) => {
         const map = {
-            'offen': '📬 Offen', 'in_bearbeitung': '⚙️ In Bearbeitung',
-            'versand': '📦 Versendet', 'abgeschlossen': '✅ Abgeschlossen', 'abgebrochen': '❌ Abgebrochen'
+            'offen': '📬 Offen',
+            'bezahlt_pending': '💸 Bezahlt? (Prüfung)',
+            'in_bearbeitung': '⚙️ In Bearbeitung',
+            'versand': '📦 Versendet',
+            'abgeschlossen': '✅ Abgeschlossen',
+            'abgebrochen': '❌ Abgebrochen'
+        };
+        return map[status] || status;
+    },
+
+    getCustomerStatusLabel: (status) => {
+        const map = {
+            'offen': '📬 Offen – Zahlung ausstehend',
+            'bezahlt_pending': '⏳ Pending – Zahlung wird geprüft',
+            'in_bearbeitung': '⚙️ In Bearbeitung',
+            'versand': '📦 Versendet',
+            'abgeschlossen': '✅ Abgeschlossen',
+            'abgebrochen': '❌ Abgebrochen'
         };
         return map[status] || status;
     },
@@ -152,7 +188,7 @@ module.exports = {
     getBanReverted: (userId) => `↩️ Ban für User ${userId} wurde rückgängig gemacht.`,
     getBanConfirmed: (userId) => `✅ Ban für User ${userId} bestätigt. Alle Daten gelöscht.`,
 
-    // ── Notizen / Ping ──
+    // ── Notizen ──
 
     getNoteAdded: (orderId) => `✅ Notiz zu Bestellung \`${orderId}\` hinzugefügt.`,
 

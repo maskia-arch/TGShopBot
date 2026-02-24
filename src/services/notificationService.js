@@ -1,7 +1,6 @@
 const config = require('../config');
 const userRepo = require('../database/repositories/userRepo');
 const texts = require('../utils/texts');
-const formatters = require('../utils/formatters');
 
 let botInstance = null;
 
@@ -32,18 +31,16 @@ const notifyCustomerStatusUpdate = async (userId, orderId, newStatus) => {
 const notifyAdminsNewOrder = async (data) => {
     try {
         const admins = await userRepo.getAllAdmins();
-        const total = data.orderDetails ?
-            data.orderDetails.reduce((sum, item) => sum + (parseFloat(item.total) || 0), 0).toFixed(2) : '0.00';
 
         const text = texts.getAdminNewOrderNotify({
             ...data,
-            total,
-            paymentName: data.paymentId === 'MANUAL' ? 'Manuelle Abwicklung' : (data.paymentMethodName || data.paymentId)
+            total: data.total || '0.00',
+            paymentName: data.paymentName || (data.paymentId === 'MANUAL' ? 'Manuelle Abwicklung' : data.paymentId)
         });
 
         const keyboard = {
             inline_keyboard: [
-                [{ text: `📋 Bestellung öffnen`, callback_data: `oview_${data.orderId}` }]
+                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
             ]
         };
 
@@ -53,7 +50,7 @@ const notifyAdminsNewOrder = async (data) => {
             }).catch(() => {});
         }
 
-        // Master extra
+        // Master extra benachrichtigen falls nicht in Admin-Liste
         if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
             sendTo(config.MASTER_ADMIN_ID, text, {
                 reply_markup: keyboard, disable_web_page_preview: true
@@ -64,13 +61,34 @@ const notifyAdminsNewOrder = async (data) => {
     }
 };
 
+const notifyAdminsTxId = async (data) => {
+    try {
+        const admins = await userRepo.getAllAdmins();
+        const text = texts.getAdminTxIdNotify(data);
+
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }],
+                [{ text: '✅ Zahlung bestätigen', callback_data: `ostatus_${data.orderId}_in_bearbeitung` }]
+            ]
+        };
+
+        for (const admin of admins) {
+            sendTo(admin.telegram_id, text, { reply_markup: keyboard }).catch(() => {});
+        }
+        sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});
+    } catch (error) {
+        console.error('Notify TxId Error:', error.message);
+    }
+};
+
 const notifyAdminsPing = async (data) => {
     try {
         const admins = await userRepo.getAllAdmins();
         const text = texts.getAdminPingNotify(data);
         const keyboard = { inline_keyboard: [
             [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: `📋 Bestellung`, callback_data: `oview_${data.orderId}` }]
+            [{ text: '📋 Bestellung', callback_data: `oview_${data.orderId}` }]
         ]};
         for (const admin of admins) {
             sendTo(admin.telegram_id, text, { reply_markup: keyboard }).catch(() => {});
@@ -87,7 +105,7 @@ const notifyAdminsContact = async (data) => {
         const text = texts.getAdminContactNotify(data);
         const keyboard = { inline_keyboard: [
             [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: `📋 Bestellung`, callback_data: `oview_${data.orderId}` }]
+            [{ text: '📋 Bestellung', callback_data: `oview_${data.orderId}` }]
         ]};
         for (const admin of admins) {
             sendTo(admin.telegram_id, text, { reply_markup: keyboard }).catch(() => {});
@@ -129,6 +147,7 @@ const notifyAdminsNewProduct = async (data) => {
 module.exports = {
     init, sendTo,
     sendOrderReceipt, notifyCustomerStatusUpdate,
-    notifyAdminsNewOrder, notifyAdminsPing, notifyAdminsContact,
+    notifyAdminsNewOrder, notifyAdminsTxId,
+    notifyAdminsPing, notifyAdminsContact,
     notifyMasterBan, notifyAdminsNewProduct
 };

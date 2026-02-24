@@ -6,19 +6,23 @@ const formatPrice = (amount) => {
 
 const formatInvoice = (items, total, paymentMethod) => {
     let text = '📦 *Bestellübersicht*\n\n';
-    
+
     items.forEach(item => {
         text += `▪️ ${item.quantity}x ${item.name} (${formatPrice(item.price)}) = ${formatPrice(item.total)}\n`;
     });
-    
+
     text += `\n━━━━━━━━━━━━━━━\n`;
     text += `💰 *Gesamtsumme: ${formatPrice(total)}*\n`;
     text += `💳 *Zahlung:* ${paymentMethod.name}\n`;
-    
+
+    if (paymentMethod.wallet_address) {
+        text += `\n📋 *Zahlungsadresse:*\n\`${paymentMethod.wallet_address}\`\n_(Tippe zum Kopieren)_\n`;
+    }
+
     if (paymentMethod.description) {
         text += `\n📝 *Hinweis:* _${paymentMethod.description}_\n`;
     }
-    
+
     return text;
 };
 
