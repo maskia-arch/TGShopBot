@@ -1,23 +1,71 @@
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
-const cartRepo = require('../../database/repositories/cartRepo');
+const orderRepo = require('../../database/repositories/orderRepo');
+const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
 const formatters = require('../../utils/formatters');
 const texts = require('../../utils/texts');
-const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
+const masterMenu = require('../keyboards/masterMenu');
+const adminMenu = require('../keyboards/adminMenu');
+const customerMenu = require('../keyboards/customerMenu');
+const config = require('../../config');
 
 module.exports = (bot) => {
 
-    // ═══ SHOP-MENÜ (Kundenansicht) ═══
+    // ═══ ZURÜCK ZUM HAUPTMENÜ ═══
+    bot.action('back_to_main', async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const userId = ctx.from.id;
+            const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
+            await userRepo.upsertUser(userId, ctx.from.username || ctx.from.first_name || 'Kunde');
+            const role = await userRepo.getUserRole(userId);
+
+            let text, keyboard;
+            if (isMaster) {
+                text = texts.getWelcomeText(true, 'master');
+                keyboard = masterMenu();
+            } else if (role === 'admin') {
+                text = texts.getWelcomeText(false, 'admin');
+                keyboard = adminMenu();
+            } else {
+                const hasOrders = await orderRepo.hasActiveOrders(userId);
+                text = texts.getWelcomeText(false, 'customer');
+                keyboard = customerMenu(hasOrders);
+            }
+
+            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+        } catch (error) {
+            console.error('Back to Main Error:', error.message);
+        }
+    });
+
+    // ═══ HILFE & INFO ═══
+    bot.action('help_menu', async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.reply(texts.getHelpText(), {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
+                }
+            });
+        } catch (error) {
+            console.error('Help Menu Error:', error.message);
+        }
+    });
+
+    // ═══ SHOP-MENÜ ═══
     bot.action('shop_menu', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const categories = await productRepo.getActiveCategories();
 
             if (!categories || categories.length === 0) {
-                return uiHelper.updateOrSend(ctx, '🛍 *Shop*\n\nDerzeit sind keine Produkte verfügbar.', {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
+                return ctx.reply('🛍 *Shop*\n\nDerzeit sind keine Produkte verfügbar.', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] }
                 });
             }
 
@@ -27,11 +75,14 @@ module.exports = (bot) => {
             }]));
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'back_to_main' }]);
 
-            await uiHelper.updateOrSend(ctx, '🛍 *Shop*\n\nWähle eine Kategorie:', { inline_keyboard: keyboard });
+            await ctx.reply('🛍 *Shop*\n\nWähle eine Kategorie:', {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: keyboard }
+            });
         } catch (error) { console.error('Shop Menu Error:', error.message); }
     });
 
-    // ── Kategorie anzeigen (mit Unterkategorien oder Produkten) ──
+    // ── Kategorie anzeigen ──
     bot.action(/^category_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -39,13 +90,11 @@ module.exports = (bot) => {
             const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
 
             if (subcats.length > 0) {
-                // Hat Unterkategorien → diese anzeigen
                 const keyboard = subcats.map(sc => ([{
                     text: `📂 ${sc.name}`,
                     callback_data: `subcategory_${sc.id}`
                 }]));
 
-                // Auch Produkte ohne Unterkategorie anzeigen
                 const uncategorized = await productRepo.getProductsByCategory(categoryId, false);
                 const noSubcatProducts = uncategorized.filter(p => !p.subcategory_id);
                 noSubcatProducts.forEach(p => {
@@ -55,13 +104,15 @@ module.exports = (bot) => {
                 });
 
                 keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
-                await uiHelper.updateOrSend(ctx, 'Wähle eine Unterkategorie oder ein Produkt:', { inline_keyboard: keyboard });
+                await ctx.reply('Wähle eine Unterkategorie oder ein Produkt:', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: keyboard }
+                });
             } else {
-                // Keine Unterkategorien → Produkte direkt anzeigen
                 const products = await productRepo.getProductsByCategory(categoryId, false);
                 if (!products || products.length === 0) {
-                    return uiHelper.updateOrSend(ctx, 'Diese Kategorie ist aktuell leer.', {
-                        inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'shop_menu' }]]
+                    return ctx.reply('Diese Kategorie ist aktuell leer.', {
+                        reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'shop_menu' }]] }
                     });
                 }
 
@@ -72,7 +123,10 @@ module.exports = (bot) => {
                 });
                 keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
 
-                await uiHelper.updateOrSend(ctx, 'Wähle ein Produkt:', { inline_keyboard: keyboard });
+                await ctx.reply('Wähle ein Produkt:', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: keyboard }
+                });
             }
         } catch (error) { console.error('Category Error:', error.message); }
     });
@@ -86,8 +140,9 @@ module.exports = (bot) => {
             const products = await productRepo.getProductsBySubcategory(subcatId, false);
 
             if (!products || products.length === 0) {
-                return uiHelper.updateOrSend(ctx, `📂 *${subcat?.name || 'Unterkategorie'}*\n\nKeine Produkte verfügbar.`, {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: subcat ? `category_${subcat.category_id}` : 'shop_menu' }]]
+                return ctx.reply(`📂 *${subcat?.name || 'Unterkategorie'}*\n\nKeine Produkte verfügbar.`, {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: subcat ? `category_${subcat.category_id}` : 'shop_menu' }]] }
                 });
             }
 
@@ -98,7 +153,10 @@ module.exports = (bot) => {
             });
             keyboard.push([{ text: '🔙 Zurück', callback_data: subcat ? `category_${subcat.category_id}` : 'shop_menu' }]);
 
-            await uiHelper.updateOrSend(ctx, `📂 *${subcat?.name || ''}*\n\nWähle ein Produkt:`, { inline_keyboard: keyboard });
+            await ctx.reply(`📂 *${subcat?.name || ''}*\n\nWähle ein Produkt:`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: keyboard }
+            });
         } catch (error) { console.error('Subcategory Error:', error.message); }
     });
 
@@ -136,10 +194,10 @@ module.exports = (bot) => {
                         caption: text, parse_mode: 'Markdown', reply_markup: keyboard
                     });
                 } catch (e) {
-                    await uiHelper.updateOrSend(ctx, text, keyboard);
+                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
                 }
             } else {
-                await uiHelper.updateOrSend(ctx, text, keyboard);
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
             }
         } catch (error) { console.error('Product Error:', error.message); }
     });
@@ -154,22 +212,30 @@ module.exports = (bot) => {
 
     // ═══ INFO-PANELS ═══
 
-    bot.action('admin_info', isAdmin, async (ctx) => {
+    bot.action('admin_info', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        await uiHelper.updateOrSend(ctx, texts.getAdminInfoText(), {
-            inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]]
+        await ctx.reply(texts.getAdminInfoText(), {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]] }
         });
     });
 
-    bot.action('master_info', isMasterAdmin, async (ctx) => {
+    bot.action('master_info', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        await uiHelper.updateOrSend(ctx, texts.getMasterInfoText(), {
-            inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]]
+        await ctx.reply(texts.getMasterInfoText(), {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] }
         });
     });
 
     // ═══ NOOP ═══
     bot.action('noop', async (ctx) => {
         ctx.answerCbQuery('Dieses Produkt ist leider nicht verfügbar.').catch(() => {});
+    });
+
+    // ═══ MASTER ACK (Benachrichtigung gelesen) ═══
+    bot.action('master_ack_msg', async (ctx) => {
+        ctx.answerCbQuery('✅ Gelesen').catch(() => {});
+        try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch (e) {}
     });
 };

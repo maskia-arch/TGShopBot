@@ -1,5 +1,4 @@
 const orderRepo = require('../../database/repositories/orderRepo');
-const paymentRepo = require('../../database/repositories/paymentRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
@@ -39,14 +38,14 @@ module.exports = (bot) => {
                 if (order.tx_id) text += `🔑 TX: \`${order.tx_id}\`\n`;
                 text += `📅 ${date}\n\n`;
 
-                // Zeige "Zahlung bestätigen" nur bei offenen Orders ohne TX-ID
+                // "Zahlung bestätigen" nur bei offenen ohne TX
                 if (order.status === 'offen' && !order.tx_id) {
                     keyboard.push([{ text: `💸 Zahlen: ${order.order_id}`, callback_data: `confirm_pay_${order.order_id}` }]);
                 }
 
                 keyboard.push([
                     { text: `🔔 Ping: ${order.order_id}`, callback_data: `cust_ping_${order.order_id}` },
-                    { text: `💬 Kontakt: ${order.order_id}`, callback_data: `cust_contact_${order.order_id}` }
+                    { text: `💬 Kontakt`, callback_data: `cust_contact_${order.order_id}` }
                 ]);
             });
 
@@ -62,6 +61,7 @@ module.exports = (bot) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
             ctx.session.awaitingTxId = orderId;
 
             await ctx.reply(texts.getTxIdPrompt(), {
@@ -75,13 +75,12 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Abbrechen TX-ID ──
     bot.action('cancel_txid', async (ctx) => {
         ctx.answerCbQuery('Abgebrochen').catch(() => {});
         if (ctx.session) ctx.session.awaitingTxId = null;
-        try {
-            await ctx.editMessageText('❌ TX-ID Eingabe abgebrochen.', { parse_mode: 'Markdown' });
-        } catch (e) {}
+        await ctx.reply('❌ TX-ID Eingabe abgebrochen.', {
+            reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
+        });
     });
 
     // ── Kunden-Ping ──
@@ -112,10 +111,8 @@ module.exports = (bot) => {
     bot.action(/^cust_contact_(.+)$/, async (ctx) => {
         try {
             const orderId = ctx.match[1];
-            const userId = ctx.from.id;
-            const canContact = await userRepo.canContact(userId);
+            const canContact = await userRepo.canContact(ctx.from.id);
             if (!canContact) return ctx.answerCbQuery(texts.getContactCooldown().replace('⏰ ', ''), { show_alert: true });
-
             ctx.answerCbQuery().catch(() => {});
             await ctx.scene.enter('contactScene', { orderId });
         } catch (error) {
@@ -125,7 +122,7 @@ module.exports = (bot) => {
     });
 
     // ════════════════════════════════════
-    // ADMIN: Offene Bestellungen
+    // ADMIN: Offene Bestellungen (FIXED – ctx.reply statt updateOrSend)
     // ════════════════════════════════════
 
     bot.action('admin_open_orders', isAdmin, async (ctx) => {
@@ -145,23 +142,24 @@ module.exports = (bot) => {
 
             orders.forEach((order, i) => {
                 const date = new Date(order.created_at).toLocaleDateString('de-DE');
-                text += `${i + 1}. \`${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)} | ${date}`;
-                if (order.tx_id) text += ` | TX: ✅`;
-                text += `\n`;
-                keyboard.push([{ text: `📋 ${order.order_id} ${order.status === 'bezahlt_pending' ? '💸' : ''}`, callback_data: `oview_${order.order_id}` }]);
+                const txBadge = order.tx_id ? ' 💸' : '';
+                text += `${i + 1}. \`${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)}${txBadge} | ${date}\n`;
+                keyboard.push([{
+                    text: `📋 ${order.order_id}${order.status === 'bezahlt_pending' ? ' 💸' : ''}`,
+                    callback_data: `oview_${order.order_id}`
+                }]);
             });
 
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
-
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
         } catch (error) {
             console.error('Open Orders Error:', error.message);
-            await ctx.reply(texts.getGeneralError());
+            await ctx.reply('❌ Fehler beim Laden der Bestellungen.');
         }
     });
 
     // ════════════════════════════════════
-    // ADMIN: Order-Aktionen via Buttons
+    // ADMIN: Order-Detail Ansicht
     // ════════════════════════════════════
 
     bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
@@ -169,23 +167,18 @@ module.exports = (bot) => {
         try {
             const orderId = ctx.match[1];
             const order = await orderRepo.getOrderByOrderId(orderId);
-            if (!order) {
-                return ctx.reply(`⚠️ Bestellung "${orderId}" nicht gefunden.`);
-            }
+            if (!order) return ctx.reply(`⚠️ Bestellung "${orderId}" nicht gefunden.`);
 
-            const username = order.users?.username ? `@${order.users.username}` : `ID: ${order.user_id}`;
             const date = formatters.formatDate(order.created_at);
-
             let text = `📋 *Bestellung ${order.order_id}*\n\n`;
-            text += `👤 Kunde: ${username}\n📅 Datum: ${date}\n`;
+            text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
             text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
             text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
             text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
 
             if (order.delivery_method === 'shipping') text += `🚚 Lieferung: Versand\n`;
             else if (order.delivery_method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
-
-            if (order.shipping_link) text += `\n📦 Adresse: [Privnote öffnen](${order.shipping_link})`;
+            if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
             if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
 
             if (order.admin_notes && order.admin_notes.length > 0) {
@@ -214,12 +207,11 @@ module.exports = (bot) => {
                         { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
                         { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
                     ],
-                    [{ text: '📝 Notiz hinzufügen', callback_data: `onote_${order.order_id}` }],
-                    [{ text: '🗑 Bestellung löschen', callback_data: `odel_${order.order_id}` }]
+                    [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
+                    [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
                 ]
             };
 
-            // Persistent message (neue Nachricht, nicht editieren)
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
         } catch (error) {
             console.error('Order View Error:', error.message);
@@ -233,82 +225,71 @@ module.exports = (bot) => {
             const newStatus = ctx.match[2];
 
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
-            if (!updated) return ctx.answerCbQuery('Bestellung nicht gefunden.', { show_alert: true });
+            if (!updated) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
 
-            // Kunden über Status-Update benachrichtigen
             notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus).catch(() => {});
-            ctx.answerCbQuery(`✅ Status: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
+            ctx.answerCbQuery(`✅ ${texts.getStatusLabel(newStatus)}`).catch(() => {});
 
-            // Aktualisierte Ansicht als neue Nachricht
-            await ctx.reply(`✅ Status von \`${orderId}\` geändert zu: ${texts.getStatusLabel(newStatus)}`, {
+            await ctx.reply(`✅ \`${orderId}\` → ${texts.getStatusLabel(newStatus)}`, {
                 parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]]
-                }
+                reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
             });
         } catch (error) {
-            console.error('Status Update Error:', error.message);
+            console.error('Status Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
-    // ── Notiz hinzufügen ──
+    // ── Notiz ──
     bot.action(/^onote_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
             ctx.session.awaitingNote = orderId;
-            await ctx.reply(`📝 *Notiz zu ${orderId}*\n\nBitte sende jetzt deine Notiz als Text:`, {
+            await ctx.reply(`📝 *Notiz zu ${orderId}*\n\nSende deine Notiz als Text:`, {
                 parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: `cancel_note` }]] }
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_note' }]] }
             });
-        } catch (error) {
-            console.error('Note Prompt Error:', error.message);
-        }
+        } catch (error) { console.error(error.message); }
     });
 
-    bot.action('cancel_note', isAdmin, async (ctx) => {
+    bot.action('cancel_note', async (ctx) => {
         ctx.answerCbQuery('Abgebrochen').catch(() => {});
         if (ctx.session) ctx.session.awaitingNote = null;
-        try { await ctx.editMessageText('❌ Notiz abgebrochen.'); } catch (e) {}
+        await ctx.reply('❌ Abgebrochen.');
     });
 
-    // ── Bestellung löschen ──
+    // ── Bestellung löschen (mit Bestätigung) ──
     bot.action(/^odel_(.+)$/, isAdmin, async (ctx) => {
-        try {
-            const orderId = ctx.match[1];
-            ctx.answerCbQuery().catch(() => {});
-
-            await ctx.reply(`⚠️ Bestellung \`${orderId}\` wirklich löschen?`, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '🗑 Ja, löschen', callback_data: `odel_confirm_${orderId}` }],
-                        [{ text: '❌ Nein', callback_data: `oview_${orderId}` }]
-                    ]
-                }
-            });
-        } catch (error) {
-            console.error('Order Delete Prompt Error:', error.message);
-        }
+        ctx.answerCbQuery().catch(() => {});
+        const orderId = ctx.match[1];
+        await ctx.reply(`⚠️ \`${orderId}\` wirklich löschen?`, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🗑 Ja', callback_data: `odel_confirm_${orderId}` }],
+                    [{ text: '❌ Nein', callback_data: `oview_${orderId}` }]
+                ]
+            }
+        });
     });
 
     bot.action(/^odel_confirm_(.+)$/, isAdmin, async (ctx) => {
         try {
-            const orderId = ctx.match[1];
-            await orderRepo.deleteOrder(orderId);
+            await orderRepo.deleteOrder(ctx.match[1]);
             ctx.answerCbQuery('🗑 Gelöscht!').catch(() => {});
-            await ctx.editMessageText(texts.getOrderDeleted(orderId), { parse_mode: 'Markdown' });
+            await ctx.reply(`🗑 Bestellung \`${ctx.match[1]}\` gelöscht.`, { parse_mode: 'Markdown' });
         } catch (error) {
-            console.error('Order Delete Error:', error.message);
+            console.error(error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
-    // ── Alle Bestellungen löschen ──
+    // ── Alle löschen ──
     bot.action('orders_delete_all_confirm', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        await ctx.reply('⚠️ *ACHTUNG*\n\nAlle Bestellungen werden unwiderruflich gelöscht!', {
+        await ctx.reply('⚠️ *ALLE Bestellungen löschen?*\n\nDies kann nicht rückgängig gemacht werden!', {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
@@ -322,11 +303,9 @@ module.exports = (bot) => {
     bot.action('orders_delete_all_execute', isAdmin, async (ctx) => {
         try {
             await orderRepo.deleteAllOrders();
-            ctx.answerCbQuery('✅ Alle gelöscht!').catch(() => {});
-            await ctx.editMessageText(texts.getOrdersDeletedAll(), { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('Delete All Orders Error:', error.message);
-        }
+            ctx.answerCbQuery('✅').catch(() => {});
+            await ctx.reply('🗑 Alle Bestellungen gelöscht.', { parse_mode: 'Markdown' });
+        } catch (error) { console.error(error.message); }
     });
 
     // ════════════════════════════════════
@@ -338,27 +317,22 @@ module.exports = (bot) => {
         try {
             const customers = await userRepo.getAllCustomers();
             if (!customers || customers.length === 0) {
-                return ctx.reply('📊 *Kundenübersicht*\n\nKeine Kunden registriert.', {
+                return ctx.reply('📊 Keine Kunden registriert.', {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] }
                 });
             }
 
-            let text = `📊 *Kundenübersicht* (${customers.length} Kunden)\n\n`;
+            let text = `📊 *Kundenübersicht* (${customers.length})\n\n`;
             const keyboard = [];
-            const shown = customers.slice(0, 20);
-            shown.forEach((c, i) => {
+            customers.slice(0, 20).forEach((c, i) => {
                 const name = c.username ? `@${c.username}` : `ID: ${c.telegram_id}`;
-                const banned = c.is_banned ? ' 🚫' : '';
-                text += `${i + 1}. ${name}${banned}\n`;
+                text += `${i + 1}. ${name}${c.is_banned ? ' 🚫' : ''}\n`;
                 keyboard.push([{ text: `👤 ${c.username || c.telegram_id}`, callback_data: `cust_detail_${c.telegram_id}` }]);
             });
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
-
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
-        } catch (error) {
-            console.error('Customer Overview Error:', error.message);
-        }
+        } catch (error) { console.error(error.message); }
     });
 
     bot.action(/^cust_detail_(\d+)$/, isMasterAdmin, async (ctx) => {
@@ -367,104 +341,85 @@ module.exports = (bot) => {
             const targetId = ctx.match[1];
             const orders = await orderRepo.getOrdersByUser(targetId);
 
-            let text = `👤 *Kunde: ${targetId}*\n\n`;
-            text += `📋 *Bestellungen:* ${orders.length}\n`;
-
+            let text = `👤 *Kunde: ${targetId}*\n\n📋 Bestellungen: ${orders.length}\n`;
             if (orders.length > 0) {
-                const totalSpent = orders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-                const activeOrders = orders.filter(o => ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand'].includes(o.status));
-                text += `💰 *Gesamtumsatz:* ${formatters.formatPrice(totalSpent)}\n`;
-                text += `📬 *Offene Bestellungen:* ${activeOrders.length}\n`;
-                text += `📅 *Letzte Bestellung:* ${new Date(orders[0].created_at).toLocaleDateString('de-DE')}\n`;
-
+                const total = orders.reduce((s, o) => s + parseFloat(o.total_amount || 0), 0);
+                const active = orders.filter(o => ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand'].includes(o.status));
+                text += `💰 Umsatz: ${formatters.formatPrice(total)}\n📬 Offen: ${active.length}\n`;
                 text += `\n*Letzte Bestellungen:*\n`;
                 orders.slice(0, 5).forEach((o, i) => {
                     text += `${i + 1}. /orderid ${o.order_id} | ${formatters.formatPrice(o.total_amount)} | ${texts.getStatusLabel(o.status)}\n`;
                 });
             }
 
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '👤 Kontaktieren', url: `tg://user?id=${targetId}` }],
-                    [{ text: '🔨 User bannen', callback_data: `cust_ban_${targetId}` }],
-                    [{ text: '🗑 User & Daten löschen', callback_data: `cust_delete_${targetId}` }],
-                    [{ text: '🔙 Zurück', callback_data: 'master_customer_overview' }]
-                ]
-            };
-
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-        } catch (error) {
-            console.error('Customer Detail Error:', error.message);
-        }
+            await ctx.reply(text, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '👤 Kontaktieren', url: `tg://user?id=${targetId}` }],
+                        [{ text: '🔨 Bannen', callback_data: `cust_ban_${targetId}` }],
+                        [{ text: '🗑 Löschen', callback_data: `cust_delete_${targetId}` }],
+                        [{ text: '🔙 Zurück', callback_data: 'master_customer_overview' }]
+                    ]
+                }
+            });
+        } catch (error) { console.error(error.message); }
     });
 
     bot.action(/^cust_ban_(\d+)$/, isMasterAdmin, async (ctx) => {
         try {
             const targetId = Number(ctx.match[1]);
-            if (targetId === Number(config.MASTER_ADMIN_ID)) return ctx.answerCbQuery(texts.getBanMasterError(), { show_alert: true });
-
-            const alreadyBanned = await userRepo.isUserBanned(targetId);
-            if (alreadyBanned) return ctx.answerCbQuery(texts.getBanAlreadyBanned(), { show_alert: true });
+            if (targetId === Number(config.MASTER_ADMIN_ID)) return ctx.answerCbQuery('Master kann nicht gebannt werden.', { show_alert: true });
+            if (await userRepo.isUserBanned(targetId)) return ctx.answerCbQuery('Bereits gebannt.', { show_alert: true });
 
             await userRepo.banUser(targetId);
             const pendingBan = await userRepo.createPendingBan(targetId, ctx.from.id);
             bot.telegram.sendMessage(targetId, texts.getBannedMessage()).catch(() => {});
-
             notificationService.notifyMasterBan({
                 userId: targetId, bannedBy: 'Master', banId: pendingBan.id,
                 time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
             }).catch(() => {});
-
-            ctx.answerCbQuery('🔨 User gebannt!').catch(() => {});
-            await ctx.reply(`🔨 User ${targetId} wurde gebannt.`, { parse_mode: 'Markdown' });
+            ctx.answerCbQuery('🔨 Gebannt!').catch(() => {});
+            await ctx.reply(`🔨 User ${targetId} gebannt.`);
         } catch (error) {
-            console.error('Customer Ban Error:', error.message);
+            console.error(error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
     bot.action(/^cust_delete_(\d+)$/, isMasterAdmin, async (ctx) => {
         try {
-            const targetId = ctx.match[1];
-            await userRepo.deleteUserCompletely(targetId);
+            await userRepo.deleteUserCompletely(ctx.match[1]);
             ctx.answerCbQuery('🗑 Gelöscht!').catch(() => {});
-            await ctx.reply(`🗑 User ${targetId} und alle Daten gelöscht.`);
+            await ctx.reply(`🗑 User ${ctx.match[1]} gelöscht.`);
         } catch (error) {
-            console.error('Customer Delete Error:', error.message);
+            console.error(error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
     // ════════════════════════════════════
-    // MASTER: Ban-Aktionen
+    // Ban-Aktionen
     // ════════════════════════════════════
 
     bot.action(/^master_revert_ban_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
-            const banId = ctx.match[1];
-            const ban = await userRepo.revertBan(banId);
-            if (!ban) return ctx.answerCbQuery('Ban nicht gefunden.', { show_alert: true });
-            ctx.answerCbQuery('✅ Ban rückgängig!').catch(() => {});
+            const ban = await userRepo.revertBan(ctx.match[1]);
+            if (!ban) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
+            ctx.answerCbQuery('✅').catch(() => {});
             await ctx.reply(texts.getBanReverted(ban.user_id), { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('Revert Ban Error:', error.message);
-            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
-        }
+        } catch (error) { ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {}); }
     });
 
     bot.action(/^master_confirm_ban_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
-            const banId = ctx.match[1];
-            const ban = await userRepo.getPendingBan(banId);
-            if (!ban) return ctx.answerCbQuery('Ban nicht gefunden.', { show_alert: true });
-            await userRepo.confirmBan(banId);
+            const ban = await userRepo.getPendingBan(ctx.match[1]);
+            if (!ban) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
+            await userRepo.confirmBan(ctx.match[1]);
             await userRepo.deleteUserCompletely(ban.user_id);
-            ctx.answerCbQuery('✅ Bestätigt!').catch(() => {});
+            ctx.answerCbQuery('✅').catch(() => {});
             await ctx.reply(texts.getBanConfirmed(ban.user_id), { parse_mode: 'Markdown' });
-        } catch (error) {
-            console.error('Confirm Ban Error:', error.message);
-            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
-        }
+        } catch (error) { ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {}); }
     });
 
     // ════════════════════════════════════
@@ -476,8 +431,10 @@ module.exports = (bot) => {
 
         const input = ctx.message.text.trim();
         if (input.startsWith('/')) {
-            ctx.session.awaitingTxId = null;
-            ctx.session.awaitingNote = null;
+            if (ctx.session) {
+                ctx.session.awaitingTxId = null;
+                ctx.session.awaitingNote = null;
+            }
             return next();
         }
 
@@ -488,32 +445,25 @@ module.exports = (bot) => {
 
             try {
                 const updated = await orderRepo.updateOrderTxId(orderId, input);
-                if (!updated) {
-                    return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
-                }
+                if (!updated) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
 
-                // Bestätigung an Kunden (persistent)
+                // Bestätigung an Kunden
                 await ctx.reply(texts.getTxIdConfirmed(orderId), {
                     parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]]
-                    }
+                    reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
                 });
 
-                // Admin/Master benachrichtigen
-                const order = await orderRepo.getOrderByOrderId(orderId);
+                // Admin benachrichtigen
                 const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
-
                 notificationService.notifyAdminsTxId({
                     orderId, userId: ctx.from.id, username,
-                    total: formatters.formatPrice(order?.total_amount || 0),
-                    paymentName: order?.payment_method_name || 'N/A',
+                    total: formatters.formatPrice(updated.total_amount || 0),
+                    paymentName: updated.payment_method_name || 'N/A',
                     txId: input
                 }).catch(() => {});
-
             } catch (error) {
                 console.error('TX-ID Save Error:', error.message);
-                ctx.reply(texts.getGeneralError());
+                ctx.reply('❌ Fehler beim Speichern. Bitte versuche es erneut.');
             }
             return;
         }
@@ -524,13 +474,13 @@ module.exports = (bot) => {
             ctx.session.awaitingNote = null;
 
             try {
-                const authorName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
-                const result = await orderRepo.addAdminNote(orderId, authorName, input);
+                const author = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+                const result = await orderRepo.addAdminNote(orderId, author, input);
                 if (!result) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
                 await ctx.reply(texts.getNoteAdded(orderId), { parse_mode: 'Markdown' });
             } catch (error) {
-                console.error('Add Note Error:', error.message);
-                ctx.reply(texts.getGeneralError());
+                console.error('Note Error:', error.message);
+                ctx.reply('❌ Fehler beim Speichern.');
             }
             return;
         }
