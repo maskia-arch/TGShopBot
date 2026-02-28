@@ -4,8 +4,15 @@ const formatPrice = (amount) => {
     return num.toFixed(2).replace('.', ',') + ' €';
 };
 
-const formatInvoice = (items, total, paymentMethod) => {
-    let text = '📦 *Bestellübersicht*\n\n';
+const formatInvoice = (items, total, paymentMethod, orderId = null) => {
+    let text = '📦 *Bestellübersicht*\n';
+    
+    // Wenn eine Order-ID vorhanden ist, wird sie im neuen Branding-Stil angezeigt
+    if (orderId) {
+        text += `🆔 *Bestellung:* #${orderId}\n`;
+    }
+    
+    text += '\n';
 
     items.forEach(item => {
         text += `▪️ ${item.quantity}x ${item.name} (${formatPrice(item.price)}) = ${formatPrice(item.total)}\n`;

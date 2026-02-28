@@ -1,12 +1,27 @@
 const supabase = require('../supabaseClient');
+const crypto = require('crypto');
+
+// Hilfsfunktion zur Generierung der neuen Order-ID (z.B. order26lc54)
+const generateCustomOrderId = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < 6; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `order${result}`;
+};
 
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod } = options;
+    
+    // Generiere die neue, attraktive Order-ID
+    const customId = generateCustomOrderId();
 
     const { data, error } = await supabase
         .from('orders')
         .insert([{
             user_id: userId,
+            order_id: customId, // Wir setzen die ID jetzt manuell beim Insert
             total_amount: totalAmount,
             details: orderDetails,
             status: 'offen',
@@ -27,8 +42,8 @@ const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
     delivery_method, admin_notes, tx_id, created_at, notification_msg_ids`;
 
 const getOrderByOrderId = async (orderId) => {
-    let searchId = orderId.toString().trim().toUpperCase();
-    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.replace(/^0+/, '').padStart(5, '0');
+    // Flexiblere Suche: Entferne ein eventuelles '#' oder '/' am Anfang
+    let searchId = orderId.toString().trim().toLowerCase().replace(/[#/]/g, '');
 
     const { data, error } = await supabase
         .from('orders')
@@ -85,9 +100,7 @@ const addAdminNote = async (orderId, authorName, noteText) => {
 };
 
 const deleteOrder = async (orderId) => {
-    let searchId = orderId.toString().trim().toUpperCase();
-    if (!searchId.startsWith('ORD-')) searchId = 'ORD-' + searchId.replace(/^0+/, '').padStart(5, '0');
-    const { error } = await supabase.from('orders').delete().eq('order_id', searchId);
+    const { error } = await supabase.from('orders').delete().eq('order_id', orderId);
     if (error) throw error;
     return true;
 };

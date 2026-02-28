@@ -27,7 +27,7 @@ module.exports = {
 
     getAdminNewOrderNotify: (data) => {
         let text = `🛍 *NEUE BESTELLUNG*\n\n` +
-            `📋 Order: /orderid ${data.orderId || 'N/A'}\n` +
+            `📋 Order: /${data.orderId || 'N/A'}\n` +
             `👤 Kunde: ${data.username} (ID: ${data.userId})\n` +
             `💰 Betrag: ${data.total}€\n` +
             `💳 Methode: ${data.paymentName}\n`;
@@ -40,7 +40,7 @@ module.exports = {
 
     getAdminTxIdNotify: (data) =>
         `💸 *ZAHLUNG EINGEGANGEN?*\n\n` +
-        `📋 Order: /orderid ${data.orderId}\n` +
+        `📋 Order: /${data.orderId}\n` +
         `👤 Kunde: ${data.username} (ID: ${data.userId})\n` +
         `💰 Betrag: ${data.total}\n` +
         `💳 Methode: ${data.paymentName}\n` +
@@ -68,7 +68,7 @@ module.exports = {
 
     getCustomerInvoice: (data) => {
         let text = `🧾 *Rechnung / Bestellbestätigung*\n\n`;
-        text += `📋 *Order-ID:* \`${data.orderId}\`\n`;
+        text += `📋 *Order-ID:* \`#${data.orderId}\`\n`;
         text += `💰 *Offener Betrag:* ${data.total}€\n`;
         text += `💳 *Zahlungsart:* ${data.paymentName}\n`;
         if (data.walletAddress) {
@@ -84,10 +84,10 @@ module.exports = {
         `🔑 *TX-ID / Zahlungsbeleg*\n\nBitte sende jetzt deine Transaktions-ID oder Zahlungsreferenz als Text:`,
 
     getTxIdConfirmed: (orderId) =>
-        `✅ *Zahlung übermittelt!*\n\n📋 Order: \`${orderId}\`\n\nDeine TX-ID wurde gespeichert. Der Verkäufer prüft den Zahlungseingang.\n\n📦 Status: *Pending* – Warte auf Bestätigung`,
+        `✅ *Zahlung übermittelt!*\n\n📋 Order: \`#${orderId}\`\n\nDeine TX-ID wurde gespeichert. Der Verkäufer prüft den Zahlungseingang.\n\n📦 Status: *Pending* – Warte auf Bestätigung`,
 
     getOrderReceipt: (data) => {
-        let text = `🧾 *Bestellbestätigung*\n\n📋 *Order-ID:* \`${data.orderId}\`\n` +
+        let text = `🧾 *Bestellbestätigung*\n\n📋 *Order-ID:* \`#${data.orderId}\`\n` +
             `💰 *Betrag:* ${data.total}€\n💳 *Zahlungsart:* ${data.paymentName}\n📦 *Status:* ${data.status || 'Offen'}\n`;
         if (data.deliveryMethod === 'shipping') text += `🚚 *Lieferung:* Versand\n`;
         else if (data.deliveryMethod === 'pickup') text += `🏪 *Lieferung:* Abholung\n`;
@@ -96,7 +96,7 @@ module.exports = {
 
     getStatusUpdateText: (orderId, newStatus) => {
         const label = module.exports.getStatusLabel(newStatus);
-        return `🔔 *Status-Update*\n\nDeine Bestellung \`${orderId}\` wurde aktualisiert:\n\n*Neuer Status:* ${label}`;
+        return `🔔 *Status-Update*\n\nDeine Bestellung \`#${orderId}\` wurde aktualisiert:\n\n*Neuer Status:* ${label}`;
     },
 
     getStatusLabel: (status) => {
@@ -133,8 +133,8 @@ module.exports = {
     getAdminInfoText: () =>
         `ℹ️ *Admin-Befehle & Funktionen*\n\n` +
         `*/start* – Bot neu starten\n` +
-        `*/orderid [ORD-XXXXX]* – Bestellung abrufen\n` +
-        `*/deleteid [ORD-XXXXX]* – Bestellung löschen\n` +
+        `*/order...* – Klicke auf eine ID zum Abrufen\n` +
+        `*/deleteid [orderxxxxxx]* – Bestellung löschen\n` +
         `*/orders* – Alle Bestellungen anzeigen\n` +
         `*/ban [TelegramID]* – User sperren\n\n` +
         `*Panel-Funktionen:*\n` +
@@ -144,8 +144,8 @@ module.exports = {
         `ℹ️ *Master-Befehle & Funktionen*\n\n` +
         `*/start* – Bot neu starten\n` +
         `*/addadmin [TelegramID]* – Admin hinzufügen\n` +
-        `*/orderid [ORD-XXXXX]* – Bestellung abrufen\n` +
-        `*/deleteid [ORD-XXXXX]* – Bestellung löschen\n` +
+        `*/order...* – Klicke auf eine ID zum Abrufen\n` +
+        `*/deleteid [orderxxxxxx]* – Bestellung löschen\n` +
         `*/orders* – Alle Bestellungen anzeigen\n` +
         `*/ban [TelegramID]* – User sperren\n\n` +
         `*Master-Panel:*\n` +
@@ -190,31 +190,31 @@ module.exports = {
 
     // ── Notizen ──
 
-    getNoteAdded: (orderId) => `✅ Notiz zu Bestellung \`${orderId}\` hinzugefügt.`,
+    getNoteAdded: (orderId) => `✅ Notiz zu Bestellung \`#${orderId}\` hinzugefügt.`,
 
     getAdminPingNotify: (data) =>
-        `🔔 *Kunden-Ping*\n\n👤 ${data.username} (ID: ${data.userId})\n📋 /orderid ${data.orderId}\n\nDer Kunde wartet auf ein Update.`,
+        `🔔 *Kunden-Ping*\n\n👤 ${data.username} (ID: ${data.userId})\n📋 /${data.orderId}\n\nDer Kunde wartet auf ein Update.`,
 
     getAdminContactNotify: (data) =>
-        `💬 *Kontaktanfrage*\n\n👤 ${data.username} (ID: ${data.userId})\n📋 /orderid ${data.orderId}\n\n*Nachricht:*\n${data.message}`,
+        `💬 *Kontaktanfrage*\n\n👤 ${data.username} (ID: ${data.userId})\n📋 /${data.orderId}\n\n*Nachricht:*\n${data.message}`,
 
     // ── Orders ──
 
     getOrdersListHeader: () => `📋 *Alle Bestellungen*\n`,
     getOrdersEmpty: () => `📋 Keine Bestellungen vorhanden.`,
     getOrdersDeletedAll: () => `🗑 Alle Bestellungen wurden gelöscht.`,
-    getOrderDeleted: (id) => `🗑 Bestellung \`${id}\` wurde gelöscht.`,
+    getOrderDeleted: (id) => `🗑 Bestellung \`#${id}\` wurde gelöscht.`,
 
     // ── Digitale Lieferung ──
 
     getDigitalDeliveryPrompt: (orderId) => 
-        `📥 *Digitale Lieferung für ${orderId}*\n\n` +
+        `📥 *Digitale Lieferung für #${orderId}*\n\n` +
         `Bitte sende jetzt die Zugangsdaten, Keys oder Links als einfache Textnachricht.\n\n` +
         `_Die Nachricht wird automatisch in ein hübsches Format verpackt und an den Kunden gesendet._`,
 
     getDigitalDeliveryCustomerMessage: (orderId, content) => 
         `🎉 *Deine Lieferung ist da!*\n\n` +
-        `Deine Bestellung \`${orderId}\` wurde soeben digital ausgeliefert.\n\n` +
+        `Deine Bestellung \`#${orderId}\` wurde soeben digital ausgeliefert.\n\n` +
         `📦 *Deine Lieferung:*\n` +
         `➖➖➖➖➖➖➖➖➖➖\n` +
         `${content}\n` +
@@ -222,5 +222,5 @@ module.exports = {
         `Vielen Dank für deinen Einkauf!`,
 
     getDigitalDeliverySuccess: (orderId) => 
-        `✅ *Digital versendet!*\n\nDie Lieferung für \`${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`
+        `✅ *Digital versendet!*\n\nDie Lieferung für \`#${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`
 };

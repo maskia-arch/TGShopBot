@@ -19,10 +19,26 @@ async function clearOldNotifications(ctx, order) {
 
 module.exports = (bot) => {
 
+    // NEU: Dynamischer Regex-Handler für klickbare IDs (reagiert auf /orderXXXXXX)
+    bot.hears(/^\/order[a-z0-9]{6}$/i, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.message.text.replace('/', '').trim().toLowerCase();
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            
+            if (!order) return ctx.reply(`⚠️ Bestellung \`${orderId}\` nicht gefunden.`, { parse_mode: 'Markdown' });
+            
+            await clearOldNotifications(ctx, order);
+            await showOrderView(ctx, order);
+        } catch (error) {
+            console.error('Dynamic Order Command Error:', error.message);
+            ctx.reply('❌ Fehler beim Laden der Bestellung.');
+        }
+    });
+
     bot.command('orderid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/orderid ORD-00001`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/orderid order26lc54`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply(`⚠️ Bestellung "${args}" nicht gefunden.`);
             
@@ -37,7 +53,7 @@ module.exports = (bot) => {
     bot.command('id', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/id ORD-00001`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/id order26lc54`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply('⚠️ Nicht gefunden.');
             
@@ -52,7 +68,7 @@ module.exports = (bot) => {
     bot.command('deleteid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/deleteid ORD-00001`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/deleteid order26lc54`', { parse_mode: 'Markdown' });
 
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply(`⚠️ Bestellung "${args}" nicht gefunden.`);
@@ -102,7 +118,8 @@ module.exports = (bot) => {
             orders.forEach((order, i) => {
                 const date = new Date(order.created_at).toLocaleDateString('de-DE');
                 const txBadge = order.status === 'bezahlt_pending' ? '💸 ' : '';
-                text += `${i + 1}. ${txBadge}/orderid ${order.order_id} | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)} | ${date}\n`;
+                // Geändert: Die Order-ID wird nun direkt als /Befehl ausgegeben für 1-Klick-Zugriff
+                text += `${i + 1}. ${txBadge}/${order.order_id} | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)} | ${date}\n`;
             });
 
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
@@ -144,7 +161,7 @@ module.exports = (bot) => {
 
 async function showOrderView(ctx, order) {
     const date = formatters.formatDate(order.created_at);
-    let text = `📋 *Bestellung ${order.order_id}*\n\n`;
+    let text = `📋 *Bestellung #${order.order_id}*\n\n`; // Hash vor der ID für besseren Look
     text += `👤 Kunde: ID ${order.user_id}\n📅 ${date}\n`;
     text += `💰 ${formatters.formatPrice(order.total_amount)}\n`;
     text += `💳 ${order.payment_method_name || 'N/A'}\n`;
