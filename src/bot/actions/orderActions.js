@@ -11,12 +11,71 @@ const FINAL_STATUSES = ['abgeschlossen', 'abgebrochen'];
 
 async function clearOldNotifications(ctx, order) {
     if (!order || !order.notification_msg_ids || order.notification_msg_ids.length === 0) return;
+    const currentMsgId = ctx.callbackQuery?.message?.message_id; // Verhindert das Löschen der aktuellen Admin-Nachricht
+    
     for (const msg of order.notification_msg_ids) {
         try {
+            if (currentMsgId && msg.message_id === currentMsgId) continue;
             await ctx.telegram.deleteMessage(msg.chat_id, msg.message_id);
         } catch (e) {}
     }
     await orderRepo.clearNotificationMsgIds(order.order_id);
+}
+
+// Zentraler Helfer für das Order-View-Layout (inkl. Zurück-Button)
+async function buildOrderViewPayload(order) {
+    const date = formatters.formatDate(order.created_at);
+    let text = `📋 *Bestellung #${order.order_id}*\n\n`;
+    text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
+    text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
+    text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
+    text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
+
+    const method = order.delivery_method;
+    if (method === 'shipping') text += `🚚 Lieferung: Versand\n`;
+    else if (method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
+    else if (method === 'none' || !method) text += `📱 Lieferung: Digital\n`;
+
+    if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
+    if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
+
+    if (order.admin_notes && order.admin_notes.length > 0) {
+        text += `\n\n📝 *Notizen:*`;
+        order.admin_notes.forEach((note, i) => {
+            const nd = new Date(note.date).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
+            text += `\n${i + 1}. _${note.author}_ (${nd}): ${note.text}`;
+        });
+    }
+
+    if (order.details && order.details.length > 0) {
+        text += `\n\n*Artikel:*`;
+        order.details.forEach(item => {
+            text += `\n▪️ ${item.quantity}x ${item.name} = ${formatters.formatPrice(item.total)}`;
+        });
+    }
+
+    const keyboard = { inline_keyboard: [] };
+    keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
+
+    if (method === 'none' || !method) {
+        keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
+    }
+
+    keyboard.inline_keyboard.push(
+        [
+            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
+            { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
+        ],
+        [
+            { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
+            { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
+        ],
+        [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
+        [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }],
+        [{ text: '🔙 Zurück zum Panel', callback_data: 'admin_panel' }]
+    );
+
+    return { text, reply_markup: keyboard };
 }
 
 module.exports = (bot) => {
@@ -134,7 +193,7 @@ module.exports = (bot) => {
             orders.forEach((order, i) => {
                 const date = new Date(order.created_at).toLocaleDateString('de-DE');
                 const txBadge = order.tx_id ? ' 💸' : '';
-                text += `${i + 1}. \`${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)}${txBadge} | ${date}\n`;
+                text += `${i + 1}. \`#${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)}${txBadge} | ${date}\n`;
                 keyboard.push([{
                     text: `📋 ${order.order_id}${order.status === 'bezahlt_pending' ? ' 💸' : ''}`,
                     callback_data: `oview_${order.order_id}`
@@ -148,7 +207,7 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^oview_([\w-]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -156,64 +215,25 @@ module.exports = (bot) => {
             if (!order) return ctx.reply(`⚠️ Bestellung "${orderId}" nicht gefunden.`);
 
             await clearOldNotifications(ctx, order);
+            const payload = await buildOrderViewPayload(order);
 
-            const date = formatters.formatDate(order.created_at);
-            let text = `📋 *Bestellung #${order.order_id}*\n\n`;
-            text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
-            text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
-            text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
-            text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
-
-            const method = order.delivery_method;
-            if (method === 'shipping') text += `🚚 Lieferung: Versand\n`;
-            else if (method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
-            else if (method === 'none' || !method) text += `📱 Lieferung: Digital\n`;
-
-            if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
-            if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
-
-            if (order.admin_notes && order.admin_notes.length > 0) {
-                text += `\n\n📝 *Notizen:*`;
-                order.admin_notes.forEach((note, i) => {
-                    const nd = new Date(note.date).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
-                    text += `\n${i + 1}. _${note.author}_ (${nd}): ${note.text}`;
+            // Edit falls möglich, ansonsten Reply
+            await ctx.editMessageText(payload.text, { 
+                parse_mode: 'Markdown', 
+                reply_markup: payload.reply_markup, 
+                disable_web_page_preview: true 
+            }).catch(async () => {
+                await ctx.reply(payload.text, { 
+                    parse_mode: 'Markdown', 
+                    reply_markup: payload.reply_markup, 
+                    disable_web_page_preview: true 
                 });
-            }
-
-            if (order.details && order.details.length > 0) {
-                text += `\n\n*Artikel:*`;
-                order.details.forEach(item => {
-                    text += `\n▪️ ${item.quantity}x ${item.name} = ${formatters.formatPrice(item.total)}`;
-                });
-            }
-
-            const keyboard = { inline_keyboard: [] };
-            keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
-
-            if (method === 'none' || !method) {
-                keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
-            }
-
-            keyboard.inline_keyboard.push(
-                [
-                    { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
-                    { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
-                ],
-                [
-                    { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
-                    { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
-                ],
-                [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
-                [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
-            );
-
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
+            });
         } catch (error) {
             console.error('Order View Error:', error.message);
         }
     });
-
-    bot.action(/^ostatus_(order[a-z0-9]{6})_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^ostatus_([\w-]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const newStatus = ctx.match[2];
@@ -250,18 +270,22 @@ module.exports = (bot) => {
                 await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
             }
 
-            ctx.answerCbQuery(`✅ ${texts.getStatusLabel(newStatus)}`).catch(() => {});
-            await ctx.reply(`✅ \`#${orderId}\` → ${texts.getStatusLabel(newStatus)}`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
-            });
+            // Kurze Toast-Benachrichtigung und Editieren der aktuellen Nachricht
+            ctx.answerCbQuery(`✅ Status aktualisiert auf: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
+            
+            const payload = await buildOrderViewPayload(updated);
+            await ctx.editMessageText(payload.text, { 
+                parse_mode: 'Markdown', 
+                reply_markup: payload.reply_markup, 
+                disable_web_page_preview: true 
+            }).catch(() => {});
         } catch (error) {
             console.error('Status Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
-    bot.action(/^ostatus_force_(order[a-z0-9]{6})_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^ostatus_force_([\w-]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const newStatus = ctx.match[2];
@@ -282,18 +306,20 @@ module.exports = (bot) => {
                 await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
             }
 
-            ctx.answerCbQuery(`✅ ${texts.getStatusLabel(newStatus)}`).catch(() => {});
-            await ctx.reply(`✅ \`#${orderId}\` → ${texts.getStatusLabel(newStatus)} _(finaler Status überschrieben)_`, {
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
-            });
+            ctx.answerCbQuery(`✅ Status aktualisiert auf: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
+            
+            const payload = await buildOrderViewPayload(updated);
+            await ctx.editMessageText(payload.text, { 
+                parse_mode: 'Markdown', 
+                reply_markup: payload.reply_markup, 
+                disable_web_page_preview: true}).catch(() => {});
         } catch (error) {
             console.error('Force Status Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
 
-    bot.action(/^odelivery_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^odelivery_([\w-]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -312,7 +338,7 @@ module.exports = (bot) => {
         await ctx.reply('❌ Digitale Auslieferung abgebrochen.');
     });
 
-    bot.action(/^onote_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^onote_([\w-]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -331,7 +357,7 @@ module.exports = (bot) => {
         await ctx.reply('❌ Abgebrochen.');
     });
 
-    bot.action(/^odel_confirm_(order[a-z0-9]{6})$/, isMasterAdmin, async (ctx) => {
+    bot.action(/^odel_confirm_([\w-]+)$/, isMasterAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         try {
             const order = await orderRepo.getOrderByOrderId(orderId);
@@ -403,7 +429,7 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^odel_(order[a-z0-9]{6})$/, isAdmin, async (ctx) => {
+    bot.action(/^odel_([\w-]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         const orderId = ctx.match[1];
         const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
@@ -596,7 +622,6 @@ module.exports = (bot) => {
 
                 await clearOldNotifications(ctx, order);
 
-                // Hier wird der Input formatiert (Kommata werden für die Ansicht schön getrennt)
                 const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
                 const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
                 const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown' }).catch(() => null);
@@ -663,4 +688,4 @@ module.exports = (bot) => {
 
         return next();
     });
-};
+}; 

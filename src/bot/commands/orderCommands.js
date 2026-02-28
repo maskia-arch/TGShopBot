@@ -19,7 +19,7 @@ async function clearOldNotifications(ctx, order) {
 
 module.exports = (bot) => {
 
-    // NEU: Dynamischer Regex-Handler für klickbare IDs (reagiert auf /orderXXXXXX)
+    // Dynamischer Regex-Handler für klickbare IDs (reagiert auf /orderXXXXXX)
     bot.hears(/^\/order[a-z0-9]{6}$/i, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.message.text.replace('/', '').trim().toLowerCase();
@@ -158,7 +158,7 @@ module.exports = (bot) => {
     });
 };
 
-// VEREINHEITLICHTE VIEW (Identisch mit orderActions.js)
+// VEREINHEITLICHTE VIEW (Identisch mit der neuen Ansicht in orderActions.js)
 async function showOrderView(ctx, order) {
     const date = formatters.formatDate(order.created_at);
     let text = `📋 *Bestellung #${order.order_id}*\n\n`;
@@ -193,7 +193,7 @@ async function showOrderView(ctx, order) {
     const keyboard = { inline_keyboard: [] };
     keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
 
-    // Digitaler Lieferbutton (Logik aus Actions übernommen)
+    // Digitaler Lieferbutton
     if (method === 'none' || !method) {
         keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
     }
@@ -208,7 +208,8 @@ async function showOrderView(ctx, order) {
             { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
         ],
         [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
-        [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
+        [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }],
+        [{ text: '🔙 Zurück zum Panel', callback_data: 'admin_panel' }] // <-- NEU HINZUGEFÜGT
     );
 
     await ctx.reply(text, { 
