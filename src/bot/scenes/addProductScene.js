@@ -1,5 +1,6 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
+const categoryRepo = require('../../database/repositories/categoryRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const imageUploader = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
@@ -9,8 +10,6 @@ const notificationService = require('../../services/notificationService');
 
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
-
-    // ── STEP 0: Produktname ──
     async (ctx) => {
         ctx.wizard.state.productData = {
             categoryId: ctx.scene.state?.categoryId || null,
@@ -18,12 +17,30 @@ const addProductScene = new Scenes.WizardScene(
             deliveryOption: 'none'
         };
 
-        // Prüfe Unterkategorien
+        if (!ctx.wizard.state.productData.categoryId) {
+            try {
+                const categories = await categoryRepo.getAllCategories();
+                if (categories && categories.length > 0) {
+                    const keyboard = categories.map(c => ([{
+                        text: c.name, callback_data: `cat_${c.id}`
+                    }]));
+                    keyboard.push([{ text: 'Ohne Kategorie', callback_data: 'cat_none' }]);
+                    keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
+
+                    await ctx.reply('📂 *Kategorie wählen:*', {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: keyboard }
+                    });
+                    ctx.wizard.state.step = 'category';
+                    return ctx.wizard.next();
+                }
+            } catch (e) {}
+        }
+
         if (ctx.wizard.state.productData.categoryId) {
             try {
                 const subcats = await subcategoryRepo.getSubcategoriesByCategory(ctx.wizard.state.productData.categoryId);
                 if (subcats && subcats.length > 0) {
-                    ctx.wizard.state.subcats = subcats;
                     const keyboard = subcats.map(sc => ([{
                         text: sc.name, callback_data: `subcat_${sc.id}`
                     }]));
@@ -34,12 +51,12 @@ const addProductScene = new Scenes.WizardScene(
                         parse_mode: 'Markdown',
                         reply_markup: { inline_keyboard: keyboard }
                     });
+                    ctx.wizard.state.step = 'subcategory';
                     return ctx.wizard.next();
                 }
             } catch (e) {}
         }
 
-        // Kein Subcategory-Step → direkt Name abfragen
         await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
@@ -48,19 +65,51 @@ const addProductScene = new Scenes.WizardScene(
         return ctx.wizard.next();
     },
 
-    // ── STEP 1: Unterkategorie / Name ──
     async (ctx) => {
-        // Callback: Unterkategorie gewählt
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
-            ctx.answerCbQuery().catch(() => {});
 
             if (data === 'cancel_add') {
+                ctx.answerCbQuery().catch(() => {});
                 await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
                 return ctx.scene.leave();
             }
 
-            if (data.startsWith('subcat_')) {
+            if (ctx.wizard.state.step === 'category' && data.startsWith('cat_')) {
+                ctx.answerCbQuery().catch(() => {});
+                const catId = data.replace('cat_', '');
+                ctx.wizard.state.productData.categoryId = catId === 'none' ? null : catId;
+
+                if (ctx.wizard.state.productData.categoryId) {
+                    try {
+                        const subcats = await subcategoryRepo.getSubcategoriesByCategory(ctx.wizard.state.productData.categoryId);
+                        if (subcats && subcats.length > 0) {
+                            const keyboard = subcats.map(sc => ([{
+                                text: sc.name, callback_data: `subcat_${sc.id}`
+                            }]));
+                            keyboard.push([{ text: 'Ohne Unterkategorie', callback_data: 'subcat_none' }]);
+                            keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
+
+                            await ctx.reply('📂 *Unterkategorie wählen:*', {
+                                parse_mode: 'Markdown',
+                                reply_markup: { inline_keyboard: keyboard }
+                            });
+                            ctx.wizard.state.step = 'subcategory';
+                            return;
+                        }
+                    } catch (e) {}
+                }
+
+                await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                });
+                ctx.wizard.state.step = 'name';
+                return;
+            }
+
+            if (ctx.wizard.state.step === 'subcategory' && data.startsWith('subcat_')) {
+                ctx.answerCbQuery().catch(() => {});
                 const subcatId = data.replace('subcat_', '');
                 ctx.wizard.state.productData.subcategoryId = subcatId === 'none' ? null : subcatId;
 
@@ -71,10 +120,50 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.wizard.state.step = 'name';
                 return;
             }
+
+            if (ctx.wizard.state.step === 'delivery') {
+                ctx.answerCbQuery().catch(() => {});
+                const deliveryMap = {
+                    'delivery_none': 'none',
+                    'delivery_shipping': 'shipping',
+                    'delivery_pickup': 'pickup',
+                    'delivery_both': 'both'
+                };
+
+                if (deliveryMap[data]) {
+                    ctx.wizard.state.productData.deliveryOption = deliveryMap[data];
+                    try {
+                        const pd = ctx.wizard.state.productData;
+                        const result = await productRepo.addProduct(pd);
+                        const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
+                        let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
+
+                        await ctx.reply(successText, {
+                            parse_mode: 'Markdown',
+                            reply_markup: {
+                                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+                            }
+                        });
+
+                        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
+                            notificationService.notifyAdminsNewProduct({
+                                adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
+                                productName: pd.name,
+                                categoryName: pd.categoryId || 'Keine',
+                                productId: result && result[0] ? result[0].id : 'Unbekannt',
+                                time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
+                            }).catch(() => {});
+                        }
+                    } catch (error) {
+                        console.error('Add Product Error:', error.message);
+                        await ctx.reply(`⚠️ Fehler beim Speichern: ${error.message}`);
+                    }
+                    return ctx.scene.leave();
+                }
+            }
         }
 
-        // Text: Name empfangen
-        if (ctx.wizard.state.step === 'name' && ctx.message && ctx.message.text) {
+        if (ctx.wizard.state.step === 'name' && ctx.message?.text) {
             const name = ctx.message.text.trim();
             if (name.startsWith('/')) return;
             ctx.wizard.state.productData.name = name;
@@ -86,12 +175,11 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        // Text: Beschreibung
         if (ctx.wizard.state.step === 'description') {
             if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_desc') {
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.description = null;
-            } else if (ctx.message && ctx.message.text) {
+            } else if (ctx.message?.text) {
                 ctx.wizard.state.productData.description = ctx.message.text.trim();
             } else return;
 
@@ -100,8 +188,7 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        // Text: Preis
-        if (ctx.wizard.state.step === 'price' && ctx.message && ctx.message.text) {
+        if (ctx.wizard.state.step === 'price' && ctx.message?.text) {
             const price = parseFloat(ctx.message.text.replace(',', '.'));
             if (isNaN(price) || price <= 0) {
                 return ctx.reply('⚠️ Ungültiger Preis. Bitte eine Zahl eingeben:');
@@ -115,12 +202,11 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        // Bild
         if (ctx.wizard.state.step === 'image') {
             if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_img') {
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.imageUrl = null;
-            } else if (ctx.message && ctx.message.photo) {
+            } else if (ctx.message?.photo) {
                 const photo = ctx.message.photo[ctx.message.photo.length - 1];
                 try {
                     const fileLink = await ctx.telegram.getFileLink(photo.file_id);
@@ -130,7 +216,6 @@ const addProductScene = new Scenes.WizardScene(
                 }
             } else return;
 
-            // Lieferoption abfragen
             ctx.wizard.state.step = 'delivery';
             await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
                 parse_mode: 'Markdown',
@@ -145,55 +230,6 @@ const addProductScene = new Scenes.WizardScene(
             });
             return;
         }
-
-        // Lieferoption
-        if (ctx.wizard.state.step === 'delivery' && ctx.callbackQuery) {
-            const data = ctx.callbackQuery.data;
-            ctx.answerCbQuery().catch(() => {});
-
-            const deliveryMap = {
-                'delivery_none': 'none',
-                'delivery_shipping': 'shipping',
-                'delivery_pickup': 'pickup',
-                'delivery_both': 'both'
-            };
-
-            if (deliveryMap[data]) {
-                ctx.wizard.state.productData.deliveryOption = deliveryMap[data];
-
-                // Produkt erstellen
-                try {
-                    const pd = ctx.wizard.state.productData;
-                    const result = await productRepo.addProduct(pd);
-
-                    const deliveryLabel = texts.getDeliveryLabel(pd.deliveryOption);
-                    let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
-
-                    await ctx.reply(successText, {
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
-                        }
-                    });
-
-                    // Master benachrichtigen
-                    if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
-                        notificationService.notifyAdminsNewProduct({
-                            adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
-                            productName: pd.name,
-                            categoryName: pd.categoryId || 'Keine',
-                            productId: result[0].id,
-                            time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
-                        }).catch(() => {});
-                    }
-                } catch (error) {
-                    console.error('Add Product Error:', error.message);
-                    await ctx.reply(texts.getGeneralError());
-                }
-
-                return ctx.scene.leave();
-            }
-        }
     }
 );
 
@@ -203,12 +239,7 @@ addProductScene.action('cancel_add', async (ctx) => {
     return ctx.scene.leave();
 });
 
-addProductScene.action('skip_desc', async (ctx) => {
-    // Handled in step
-});
-
-addProductScene.action('skip_img', async (ctx) => {
-    // Handled in step
-});
+addProductScene.action('skip_desc', async (ctx) => {});
+addProductScene.action('skip_img', async (ctx) => {});
 
 module.exports = addProductScene;
