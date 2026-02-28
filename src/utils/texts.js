@@ -203,5 +203,24 @@ module.exports = {
     getOrdersListHeader: () => `📋 *Alle Bestellungen*\n`,
     getOrdersEmpty: () => `📋 Keine Bestellungen vorhanden.`,
     getOrdersDeletedAll: () => `🗑 Alle Bestellungen wurden gelöscht.`,
-    getOrderDeleted: (id) => `🗑 Bestellung \`${id}\` wurde gelöscht.`
+    getOrderDeleted: (id) => `🗑 Bestellung \`${id}\` wurde gelöscht.`,
+
+    // ── Digitale Lieferung ──
+
+    getDigitalDeliveryPrompt: (orderId) => 
+        `📥 *Digitale Lieferung für ${orderId}*\n\n` +
+        `Bitte sende jetzt die Zugangsdaten, Keys oder Links als einfache Textnachricht.\n\n` +
+        `_Die Nachricht wird automatisch in ein hübsches Format verpackt und an den Kunden gesendet._`,
+
+    getDigitalDeliveryCustomerMessage: (orderId, content) => 
+        `🎉 *Deine Lieferung ist da!*\n\n` +
+        `Deine Bestellung \`${orderId}\` wurde soeben digital ausgeliefert.\n\n` +
+        `📦 *Deine Lieferung:*\n` +
+        `➖➖➖➖➖➖➖➖➖➖\n` +
+        `${content}\n` +
+        `➖➖➖➖➖➖➖➖➖➖\n\n` +
+        `Vielen Dank für deinen Einkauf!`,
+
+    getDigitalDeliverySuccess: (orderId) => 
+        `✅ *Digital versendet!*\n\nDie Lieferung für \`${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`
 };

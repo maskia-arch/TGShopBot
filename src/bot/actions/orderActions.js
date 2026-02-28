@@ -166,6 +166,8 @@ module.exports = (bot) => {
 
             if (order.delivery_method === 'shipping') text += `🚚 Lieferung: Versand\n`;
             else if (order.delivery_method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
+            else if (order.delivery_method === 'none') text += `📱 Lieferung: Digital\n`;
+
             if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
             if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
 
@@ -184,21 +186,25 @@ module.exports = (bot) => {
                 });
             }
 
-            const keyboard = {
-                inline_keyboard: [
-                    [{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }],
-                    [
-                        { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
-                        { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
-                    ],
-                    [
-                        { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
-                        { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
-                    ],
-                    [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
-                    [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
-                ]
-            };
+            const keyboard = { inline_keyboard: [] };
+            keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
+
+            if (order.delivery_method === 'none') {
+                keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
+            }
+
+            keyboard.inline_keyboard.push(
+                [
+                    { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
+                    { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
+                ],
+                [
+                    { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
+                    { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
+                ],
+                [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
+                [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
+            );
 
             await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard, disable_web_page_preview: true });
         } catch (error) {
@@ -269,6 +275,24 @@ module.exports = (bot) => {
             console.error('Force Status Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
+    });
+    bot.action(/^odelivery_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingDigitalDelivery = orderId;
+            await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
+            });
+        } catch (error) { console.error(error.message); }
+    });
+
+    bot.action('cancel_delivery', async (ctx) => {
+        ctx.answerCbQuery('Abgebrochen').catch(() => {});
+        if (ctx.session) ctx.session.awaitingDigitalDelivery = null;
+        await ctx.reply('❌ Digitale Auslieferung abgebrochen.');
     });
 
     bot.action(/^onote_(.+)$/, isAdmin, async (ctx) => {
@@ -381,10 +405,7 @@ module.exports = (bot) => {
             try {
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 const approval = await approvalRepo.createApprovalRequest(
-                    'ORDER_DELETE',
-                    ctx.from.id,         
-                    orderId,             
-                    orderId              
+                    'ORDER_DELETE', ctx.from.id, orderId, orderId              
                 );
 
                 await ctx.reply(
@@ -396,9 +417,7 @@ module.exports = (bot) => {
 
                 notificationService.sendTo(config.MASTER_ADMIN_ID,
                     `🗑 *Löschanfrage*\n\n` +
-                    `Admin: ${adminName}\n` +
-                    `Bestellung: \`${orderId}\`\n\n` +
-                    `Soll die Bestellung gelöscht werden?`,
+                    `Admin: ${adminName}\nBestellung: \`${orderId}\`\n\nSoll die Bestellung gelöscht werden?`,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -410,7 +429,7 @@ module.exports = (bot) => {
                     }
                 ).catch(() => {});
             } catch (error) {
-      console.error('Order Delete Approval Error:', error.message);
+                console.error('Order Delete Approval Error:', error.message);
                 await ctx.reply('❌ Fehler beim Senden der Löschanfrage.');
             }
         }
@@ -543,8 +562,41 @@ module.exports = (bot) => {
         if (!ctx.session || !ctx.message || !ctx.message.text) return next();
         const input = ctx.message.text.trim();
         if (input.startsWith('/')) {
-            if (ctx.session) { ctx.session.awaitingTxId = null; ctx.session.awaitingNote = null; }
+            if (ctx.session) { 
+                ctx.session.awaitingTxId = null; 
+                ctx.session.awaitingNote = null; 
+                ctx.session.awaitingDigitalDelivery = null;
+            }
             return next();
+        }
+
+        if (ctx.session.awaitingDigitalDelivery) {
+            const orderId = ctx.session.awaitingDigitalDelivery;
+            ctx.session.awaitingDigitalDelivery = null;
+            try {
+                const order = await orderRepo.getOrderByOrderId(orderId);
+                if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
+
+                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, input);
+                const sent = await notificationService.sendTo(order.user_id, customerMessage, { parse_mode: 'Markdown' });
+
+                if (sent) {
+                    await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+                    const author = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+                    await orderRepo.addAdminNote(orderId, author, `Digitale Lieferung erfolgreich an Kunde gesendet.`);
+                    
+                    await ctx.reply(texts.getDigitalDeliverySuccess(orderId), { 
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
+                    });
+                } else {
+                    await ctx.reply(`❌ Fehler: Die Nachricht konnte nicht an den Kunden (ID: ${order.user_id}) gesendet werden. Evtl. hat er den Bot blockiert.`);
+                }
+            } catch (error) {
+                console.error('Digital Delivery Error:', error.message);
+                ctx.reply('❌ Fehler bei der Auslieferung.');
+            }
+            return;
         }
 
         if (ctx.session.awaitingTxId) {
