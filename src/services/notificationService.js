@@ -1,5 +1,7 @@
 const config = require('../config');
 const userRepo = require('../database/repositories/userRepo');
+// Wir müssen orderRepo importieren, um die Msg-IDs zu speichern
+const orderRepo = require('../database/repositories/orderRepo'); 
 const texts = require('../utils/texts');
 
 let botInstance = null;
@@ -44,18 +46,32 @@ const notifyAdminsNewOrder = async (data) => {
             ]
         };
 
+        const notifyPromises = [];
+
         for (const admin of admins) {
-            sendTo(admin.telegram_id, text, {
+            const p = sendTo(admin.telegram_id, text, {
                 reply_markup: keyboard, disable_web_page_preview: true
+            }).then(msg => {
+                if (msg && msg.message_id) {
+                    return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
+                }
             }).catch(() => {});
+            notifyPromises.push(p);
         }
 
         // Master extra benachrichtigen falls nicht in Admin-Liste
         if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-            sendTo(config.MASTER_ADMIN_ID, text, {
+            const p = sendTo(config.MASTER_ADMIN_ID, text, {
                 reply_markup: keyboard, disable_web_page_preview: true
+            }).then(msg => {
+                if (msg && msg.message_id) {
+                    return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
+                }
             }).catch(() => {});
+            notifyPromises.push(p);
         }
+        
+        await Promise.all(notifyPromises);
     } catch (error) {
         console.error('Notify Admins New Order Error:', error.message);
     }
@@ -73,10 +89,27 @@ const notifyAdminsTxId = async (data) => {
             ]
         };
 
+        const notifyPromises = [];
+
         for (const admin of admins) {
-            sendTo(admin.telegram_id, text, { reply_markup: keyboard }).catch(() => {});
+            const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
+                if (msg && msg.message_id) {
+                    return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
+                }
+            }).catch(() => {});
+            notifyPromises.push(p);
         }
-        sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});
+        
+        if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
+             const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
+                if (msg && msg.message_id) {
+                     return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
+                }
+            }).catch(() => {});
+            notifyPromises.push(p);
+        }
+        
+        await Promise.all(notifyPromises);
     } catch (error) {
         console.error('Notify TxId Error:', error.message);
     }

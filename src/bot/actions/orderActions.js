@@ -7,15 +7,19 @@ const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
 
-// ── v0.3.4 UPDATE: Finale Status-Liste ──
-// Status in dieser Liste gelten als abgeschlossen. Änderungen erfordern Sicherheitsabfrage.
 const FINAL_STATUSES = ['abgeschlossen', 'abgebrochen'];
 
-module.exports = (bot) => {
+async function clearOldNotifications(ctx, order) {
+    if (!order || !order.notification_msg_ids || order.notification_msg_ids.length === 0) return;
+    for (const msg of order.notification_msg_ids) {
+        try {
+            await ctx.telegram.deleteMessage(msg.chat_id, msg.message_id);
+        } catch (e) {}
+    }
+    await orderRepo.clearNotificationMsgIds(order.order_id);
+}
 
-    // ════════════════════════════════════
-    // KUNDEN: Meine Bestellungen
-    // ════════════════════════════════════
+module.exports = (bot) => {
 
     bot.action('my_orders', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
@@ -60,7 +64,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Kunden: Zahlung bestätigen → TX-ID Abfrage ──
     bot.action(/^confirm_pay_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -82,7 +85,6 @@ module.exports = (bot) => {
         });
     });
 
-    // ── Kunden-Ping ──
     bot.action(/^cust_ping_(.+)$/, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -103,7 +105,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Kunden-Kontaktanfrage ──
     bot.action(/^cust_contact_(.+)$/, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -116,10 +117,6 @@ module.exports = (bot) => {
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
-
-    // ════════════════════════════════════
-    // ADMIN: Offene Bestellungen
-    // ════════════════════════════════════
 
     bot.action('admin_open_orders', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
@@ -151,16 +148,14 @@ module.exports = (bot) => {
         }
     });
 
-    // ════════════════════════════════════
-    // ADMIN: Order-Detail Ansicht
-    // ════════════════════════════════════
-
     bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) return ctx.reply(`⚠️ Bestellung "${orderId}" nicht gefunden.`);
+
+            await clearOldNotifications(ctx, order);
 
             const date = formatters.formatDate(order.created_at);
             let text = `📋 *Bestellung ${order.order_id}*\n\n`;
@@ -211,20 +206,14 @@ module.exports = (bot) => {
         }
     });
 
-    // ════════════════════════════════════
-    // UPDATE RUN #3: Status ändern mit Sicherheitsabfrage bei finalen Status
-    // ════════════════════════════════════
-
     bot.action(/^ostatus_(ORD-\d+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const newStatus = ctx.match[2];
 
-            // Aktuellen Status prüfen
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
 
-            // ── Sicherheitsabfrage: Wenn aktueller Status final ist ──
             if (FINAL_STATUSES.includes(order.status)) {
                 ctx.answerCbQuery().catch(() => {});
                 await ctx.reply(
@@ -244,7 +233,6 @@ module.exports = (bot) => {
                 return;
             }
 
-            // ── Normaler Statuswechsel ──
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
             if (!updated) return ctx.answerCbQuery('Fehler.', { show_alert: true });
 
@@ -260,7 +248,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── UPDATE RUN #3: Bestätigter Statuswechsel aus finalem Status ──
     bot.action(/^ostatus_force_(ORD-\d+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -269,7 +256,6 @@ module.exports = (bot) => {
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
             if (!updated) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
 
-            // Audit-Log als Admin-Notiz
             const authorName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
             await orderRepo.addAdminNote(orderId, authorName, `Status von finalem Status geändert → ${newStatus}`);
 
@@ -285,7 +271,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Notiz ──
     bot.action(/^onote_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -305,17 +290,9 @@ module.exports = (bot) => {
         await ctx.reply('❌ Abgebrochen.');
     });
 
-    // ════════════════════════════════════
-    // UPDATE RUN #1 & #2: Order-Löschung
-    // Fix: odel_confirm_ MUSS VOR odel_ registriert werden (Regex-Reihenfolge).
-    // Admin: Approval an Master. Master: Direkte Löschung.
-    // ════════════════════════════════════
-
-    // ── Bestätigte Löschung (Master only) – MUSS vor odel_ stehen! ──
     bot.action(/^odel_confirm_(ORD-\d+)$/, isMasterAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         try {
-            // Idempotent: Prüfe ob Order noch existiert
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) {
                 ctx.answerCbQuery('Bereits gelöscht.').catch(() => {});
@@ -323,10 +300,10 @@ module.exports = (bot) => {
                 return;
             }
 
+            await clearOldNotifications(ctx, order);
             await orderRepo.deleteOrder(orderId);
             ctx.answerCbQuery('🗑 Gelöscht!').catch(() => {});
 
-            // Bestätigungsnachricht ersetzt die Sicherheitsabfrage (kein erneutes Popup)
             await ctx.editMessageText(`🗑 Bestellung \`${orderId}\` wurde endgültig gelöscht.`, { parse_mode: 'Markdown' });
         } catch (error) {
             console.error('Order Delete Confirm Error:', error.message);
@@ -334,7 +311,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Master-Genehmigung einer Admin-Löschanfrage ──
     bot.action(/^odel_approve_([\w-]+)$/, isMasterAdmin, async (ctx) => {
         const approvalId = ctx.match[1];
         try {
@@ -342,10 +318,10 @@ module.exports = (bot) => {
             if (!approval) return ctx.answerCbQuery('Anfrage nicht gefunden.', { show_alert: true });
             if (approval.status !== 'pending') return ctx.answerCbQuery('Bereits bearbeitet.', { show_alert: true });
 
-            // Order löschen
-            const orderId = approval.new_value; // Order-ID in new_value gespeichert
+            const orderId = approval.new_value; 
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (order) {
+                await clearOldNotifications(ctx, order);
                 await orderRepo.deleteOrder(orderId);
             }
 
@@ -353,7 +329,6 @@ module.exports = (bot) => {
             ctx.answerCbQuery('✅ Genehmigt & gelöscht!').catch(() => {});
             await ctx.editMessageText(`✅ Löschanfrage genehmigt.\n🗑 \`${orderId}\` wurde gelöscht.`, { parse_mode: 'Markdown' });
 
-            // Admin benachrichtigen
             const adminId = approval.requested_by;
             notificationService.sendTo(adminId,
                 `✅ Deine Löschanfrage für \`${orderId}\` wurde vom Master *genehmigt*.\n🗑 Bestellung wurde gelöscht.`,
@@ -365,7 +340,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Master-Ablehnung einer Admin-Löschanfrage ──
     bot.action(/^odel_reject_([\w-]+)$/, isMasterAdmin, async (ctx) => {
         const approvalId = ctx.match[1];
         try {
@@ -377,7 +351,6 @@ module.exports = (bot) => {
             ctx.answerCbQuery('❌ Abgelehnt.').catch(() => {});
             await ctx.editMessageText(`❌ Löschanfrage für \`${approval.new_value}\` wurde abgelehnt.`, { parse_mode: 'Markdown' });
 
-            // Admin benachrichtigen
             const adminId = approval.requested_by;
             notificationService.sendTo(adminId,
                 `❌ Deine Löschanfrage für \`${approval.new_value}\` wurde vom Master *abgelehnt*.\nDie Bestellung bleibt bestehen.`,
@@ -389,14 +362,12 @@ module.exports = (bot) => {
         }
     });
 
-    // ── Löschen-Button: Rollenbasiert (Master direkt, Admin → Approval) ──
     bot.action(/^odel_(ORD-\d+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         const orderId = ctx.match[1];
         const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
 
         if (isMaster) {
-            // ── UPDATE RUN #1: Master bekommt einmalige Bestätigung ──
             await ctx.reply(`⚠️ \`${orderId}\` endgültig löschen?`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
@@ -407,16 +378,13 @@ module.exports = (bot) => {
                 }
             });
         } else {
-            // ── UPDATE RUN #2: Admin → Approval-Anfrage an Master ──
             try {
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
-
-                // Approval-Request erstellen (orderId in new_value, admin telegram_id in requested_by)
                 const approval = await approvalRepo.createApprovalRequest(
                     'ORDER_DELETE',
-                    ctx.from.id,         // requested_by = admin telegram_id
-                    orderId,             // target_id = order_id string
-                    orderId              // new_value = order_id (für Anzeige)
+                    ctx.from.id,         
+                    orderId,             
+                    orderId              
                 );
 
                 await ctx.reply(
@@ -426,7 +394,6 @@ module.exports = (bot) => {
                     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: `oview_${orderId}` }]] } }
                 );
 
-                // Master benachrichtigen
                 notificationService.sendTo(config.MASTER_ADMIN_ID,
                     `🗑 *Löschanfrage*\n\n` +
                     `Admin: ${adminName}\n` +
@@ -443,13 +410,12 @@ module.exports = (bot) => {
                     }
                 ).catch(() => {});
             } catch (error) {
-                console.error('Order Delete Approval Error:', error.message);
+      console.error('Order Delete Approval Error:', error.message);
                 await ctx.reply('❌ Fehler beim Senden der Löschanfrage.');
             }
         }
     });
 
-    // ── Alle Bestellungen löschen (nur Master) ──
     bot.action('orders_delete_all_confirm', isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         await ctx.reply('⚠️ *ALLE Bestellungen löschen?*\n\nDies kann nicht rückgängig gemacht werden!', {
@@ -470,10 +436,6 @@ module.exports = (bot) => {
             await ctx.editMessageText('🗑 Alle Bestellungen gelöscht.', { parse_mode: 'Markdown' });
         } catch (error) { console.error(error.message); }
     });
-
-    // ════════════════════════════════════
-    // MASTER: Kundenübersicht
-    // ════════════════════════════════════
 
     bot.action('master_customer_overview', isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
@@ -557,10 +519,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ════════════════════════════════════
-    // Ban-Aktionen
-    // ════════════════════════════════════
-
     bot.action(/^master_revert_ban_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
             const ban = await userRepo.revertBan(ctx.match[1]);
@@ -581,10 +539,6 @@ module.exports = (bot) => {
         } catch (error) { ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {}); }
     });
 
-    // ════════════════════════════════════
-    // TEXT HANDLER: TX-ID & Notizen
-    // ════════════════════════════════════
-
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.message || !ctx.message.text) return next();
         const input = ctx.message.text.trim();
@@ -593,7 +547,6 @@ module.exports = (bot) => {
             return next();
         }
 
-        // ── TX-ID vom Kunden ──
         if (ctx.session.awaitingTxId) {
             const orderId = ctx.session.awaitingTxId;
             ctx.session.awaitingTxId = null;
@@ -618,7 +571,6 @@ module.exports = (bot) => {
             return;
         }
 
-        // ── Admin-Notiz ──
         if (ctx.session.awaitingNote) {
             const orderId = ctx.session.awaitingNote;
             ctx.session.awaitingNote = null;

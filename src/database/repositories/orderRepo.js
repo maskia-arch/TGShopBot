@@ -3,8 +3,6 @@ const supabase = require('../supabaseClient');
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod } = options;
 
-    // WICHTIG: payment_method_id wird NICHT gespeichert (UUID-Typkonflikt).
-    // payment_method_name reicht für die Anzeige.
     const { data, error } = await supabase
         .from('orders')
         .insert([{
@@ -15,7 +13,8 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             shipping_link: shippingLink || null,
             payment_method_name: paymentMethodName || 'Nicht angegeben',
             delivery_method: deliveryMethod || null,
-            admin_notes: []
+            admin_notes: [],
+            notification_msg_ids: [] // Neues Feld initialisieren
         }])
         .select('id, order_id, status');
 
@@ -25,7 +24,7 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
 
 const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
     shipping_link, payment_method_name,
-    delivery_method, admin_notes, tx_id, created_at`;
+    delivery_method, admin_notes, tx_id, created_at, notification_msg_ids`;
 
 const getOrderByOrderId = async (orderId) => {
     let searchId = orderId.toString().trim().toUpperCase();
@@ -148,10 +147,52 @@ const getAllOrders = async (limit = 50) => {
     return data || [];
 };
 
+// --- NEUE FUNKTIONEN FÜR INTELLIGENTES LÖSCHEN ---
+
+const addNotificationMsgId = async (orderId, chatId, messageId) => {
+    try {
+        const order = await getOrderByOrderId(orderId);
+        if (!order) return null;
+        
+        const currentIds = order.notification_msg_ids || [];
+        currentIds.push({ chat_id: chatId, message_id: messageId });
+        
+        const { error } = await supabase
+            .from('orders')
+            .update({ notification_msg_ids: currentIds })
+            .eq('order_id', order.order_id);
+            
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        console.error('Error adding notification msg id:', error.message);
+        return false;
+    }
+};
+
+const clearNotificationMsgIds = async (orderId) => {
+    try {
+        const order = await getOrderByOrderId(orderId);
+        if (!order) return false;
+        
+        const { error } = await supabase
+            .from('orders')
+            .update({ notification_msg_ids: [] })
+            .eq('order_id', order.order_id);
+            
+        if (error) throw error;
+        return true;
+    } catch (error) {
+        console.error('Error clearing notification msg ids:', error.message);
+        return false;
+    }
+};
+
 module.exports = {
     createOrder, getOrderByOrderId, getOrderById,
     updateOrderStatus, updateOrderTxId, addAdminNote,
     deleteOrder, deleteAllOrders,
     getOrdersByUser, getActiveOrdersByUser, hasActiveOrders,
-    getOpenOrders, getAllOrders
+    getOpenOrders, getAllOrders,
+    addNotificationMsgId, clearNotificationMsgIds
 };

@@ -1,10 +1,16 @@
-# 🤖 t.me/autoacts – Shop Bot Core | v0.3.4
+# 🤖 t.me/autoacts – Shop Bot Core | v0.3.7
 
 Ein professionelles Telegram-E-Commerce-System mit hierarchischer Rechteverwaltung, flexiblem Liefersystem, manuellem Zahlungsflow und dezentraler Datenstruktur. Entwickelt von [t.me/autoacts](https://t.me/autoacts).
 
 ---
 
 ## 🆕 Changelog
+
+### v0.3.7 – UX-Optimierungen & Smart Cleaning
+- **🧹 Intelligentes Löschen (Smart Cleaning):** Der Bot merkt sich die IDs von Admin-Benachrichtigungen ("Neue Bestellung", "TX-ID erhalten"). Wird eine Bestellung vom Admin bearbeitet oder gelöscht, räumt der Bot den Chat automatisch auf und löscht die obsoleten Benachrichtigungen.
+- **📁 Produkt-Erstellung gefixt:** Der Wizard überspringt nun korrekt die Kategorie-Abfrage, wenn man Produkte direkt aus einer bestehenden Unterkategorie heraus anlegt.
+- **⏩ Skip-Buttons repariert:** Die Buttons zum Überspringen von Artikelbeschreibungen und Produktbildern im Setup-Wizard funktionieren nun fehlerfrei.
+- **🔀 Produkt-Sortierung:** Produkte verfügen nun in der Datenbank über eine `sort_order` Spalte für zukünftige manuelle Sortierfunktionen im Shop.
 
 ### v0.3.4 – Stabiler Bezahl- & Bestellfluss
 - **💸 TX-ID Zahlungsflow:** Kunden bestätigen Zahlungen per TX-ID. Admins werden sofort benachrichtigt und prüfen manuell.
@@ -31,33 +37,34 @@ Ein professionelles Telegram-E-Commerce-System mit hierarchischer Rechteverwaltu
 
 ---
 
-## 🏗 Architektur
+## 🏗 Architektur @autoacts
 
-### Bestellfluss (v0.3.4)
+### Bestellfluss (v0.3.7)
 
-```
 Kunde: Shop → Warenkorb → Checkout
-         ↓
-  [Lieferoption wählen: Versand / Abholung / keine]
-         ↓
-  [Versandadresse als Privnote-Link (nur bei Versand)]
-         ↓
-  Zahlungsart wählen → Rechnung mit Wallet-Adresse
-         ↓
-  "Bestellung abschicken" → Order erstellt
-         ↓
-  Receipt an Kunden (persistent):
-    • Order-ID, Betrag, Zahlungsadresse
-    • Button "💸 Zahlung bestätigen"
-         ↓
-  Admin/Master erhält: "NEUE BESTELLUNG"
-         ↓
-  Kunde: "Zahlung bestätigen" → TX-ID eingeben
-         ↓
-  Status: "Bezahlt? (Prüfung)" → Admin prüft
-         ↓
-  Admin: Status manuell ändern → Kunde erhält Update
-```
+↓
+[Lieferoption wählen: Versand / Abholung / keine]
+↓
+[Versandadresse als Privnote-Link (nur bei Versand)]
+↓
+Zahlungsart wählen → Rechnung mit Wallet-Adresse
+↓
+"Bestellung abschicken" → Order erstellt
+↓
+Receipt an Kunden (persistent):
+• Order-ID, Betrag, Zahlungsadresse
+• Button "💸 Zahlung bestätigen"
+↓
+Admin/Master erhält: "NEUE BESTELLUNG" (Bot merkt sich Message-ID)
+↓
+Kunde: "Zahlung bestätigen" → TX-ID eingeben
+↓
+Status: "Bezahlt? (Prüfung)" → Admin prüft
+↓
+Admin: Klickt auf "Bestellung öffnen"
+→ Bot löscht "NEUE BESTELLUNG" Nachricht aus dem Chat (Smart Cleaning)
+→ Status manuell ändern → Kunde erhält Update
+
 
 ### Rollensystem
 
@@ -105,6 +112,7 @@ Kunde: Shop → Warenkorb → Checkout
 - Offene Bestellungen mit 1-Klick Statusänderung
 - Admin-Notizen pro Bestellung
 - Rundnachrichten an alle Kunden
+- **NEU:** Automatisches Chat-Cleaning bei der Bearbeitung von Bestellungen.
 
 ### 💳 Kunden-Interface
 - Kategorien & Produkte durchsuchen
@@ -123,41 +131,34 @@ Kunde: Shop → Warenkorb → Checkout
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation (Neuinstallation)
 
 ### 1. Abhängigkeiten
+Stelle sicher, dass Node.js (v18+) installiert ist.
 ```bash
 npm install
-```
 
-### 2. Datenbank (Supabase)
-SQL-Befehle der Reihe nach ausführen:
-1. `SETUP.txt` (Basis-Schema)
-2. `SUPABASE_MIGRATION_v0.3.0.sql`
-3. `SUPABASE_MIGRATION_v0.3.1.sql`
-4. `SUPABASE_MIGRATION_v0.3.2.sql` (enthält `delivery_option`, `delivery_method`, `tx_id`)
-
-### 3. Environment Variables
-```
+2. Datenbank (Supabase)
+Die gesamte Datenbankstruktur (inklusive aller Updates bis v0.3.7) ist in einer einzigen Datei zusammengefasst.
+Öffne den SQL Editor in deinem Supabase Dashboard.
+Kopiere den gesamten Inhalt der Datei SETUP.txt in den Editor und führe das Script aus.
+(Hinweis: Dieses Script löscht bestehende Tabellen für einen sauberen Install!)
+3. Environment Variables
+Lege diese Variablen in deiner .env Datei oder in den Settings deines Hosters (z.B. Render.com) an:
+  
 TELEGRAM_BOT_TOKEN=your_bot_token
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_anon_key
+SUPABASE_URL=[https://your-project.supabase.co](https://your-project.supabase.co)
+SUPABASE_KEY=your_service_role_key   <-- WICHTIG: Service Role Key nutzen!
 MASTER_ADMIN_ID=your_telegram_id
+VERSION=0.3.7
 PORT=10000
-```
 
-### 4. Starten
-```bash
+4. Starten
 node src/index.js
-```
 
 Für Hosting auf Render.com: Web Service erstellen, Health-Check auf Port 10000.
+📁 Projektstruktur
 
----
-
-## 📁 Projektstruktur
-
-```
 src/
 ├── index.js                    # Bot-Setup, Middleware, Stage
 ├── config/index.js             # Konfiguration & Version
@@ -165,7 +166,7 @@ src/
 │   ├── supabaseClient.js       # Supabase-Verbindung
 │   └── repositories/
 │       ├── productRepo.js      # Produkte & Kategorien
-│       ├── orderRepo.js        # Bestellungen & TX-ID
+│       ├── orderRepo.js        # Bestellungen, TX-ID & Notification-IDs
 │       ├── cartRepo.js         # Warenkorb
 │       ├── userRepo.js         # User, Rollen, Bans
 │       ├── paymentRepo.js      # Zahlungsarten
@@ -182,7 +183,7 @@ src/
 │   │   ├── checkoutActions.js  # Checkout-Einstieg
 │   │   ├── adminActions.js     # Admin-Panel, Produkt-/Kategorie-Verwaltung
 │   │   ├── masterActions.js    # Master-Dashboard, Zahlungsarten, Admins
-│   │   └── orderActions.js     # Order-Aktionen, TX-ID, Kundenübersicht
+│   │   └── orderActions.js     # Order-Aktionen, TX-ID, Kundenübersicht, Chat-Cleaning
 │   ├── scenes/
 │   │   ├── checkoutScene.js    # State-Machine Checkout
 │   │   ├── addProductScene.js  # Produkt erstellen (mit Lieferoption)
@@ -211,40 +212,28 @@ src/
     ├── formatters.js           # Preis, Datum, Rechnung
     ├── uiHelper.js             # updateOrSend, sendTemporary
     └── imageUploader.js        # Bild-Upload Handling
-```
+    
+    🔧 Bot-Befehle
+    
+    Befehl Rolle Beschreibung
+/start Alle Hauptmenü (rollenbasiert)
+/orders Admin Alle Bestellungen anzeigen
+/orderid ORD-XXXXX Admin Einzelne Bestellung öffnen
+/id ORD-XXXXX Admin Alias für /orderid
+/deleteid ORD-XXXXX Admin Bestellung löschen
+/ban 123456789 Admin User sperren
+/addadmin 123456789 Master Admin hinzufügen
 
----
+🛡 Sicherheit
+Privnote-Adressen: Versandadressen nur als selbstzerstörende Privnote-Links. Klartext wird automatisch gelöscht.
+Hierarchische Rechte: Master → Admin → Kunde. Jede Aktion prüft die Rolle.
+Ban-System: 48h Pending mit Master-Override. Gebannte User können den Bot nicht mehr nutzen.
+Approval-Workflow: Admin-Aktionen (Preisänderungen, Löschungen) erfordern Master-Freigabe.
+Datenbanksicherheit: Row Level Security (RLS) aktiv. Der Bot arbeitet sicher über den Service Role Key.
+📦 Tech Stack
+Runtime: Node.js
+Bot Framework: Telegraf v4 (WizardScene, Session)
+Datenbank: Supabase (PostgreSQL)
+Hosting: Render.com (mit Health-Check Server)
 
-## 🔧 Bot-Befehle
-
-| Befehl | Rolle | Beschreibung |
-|---|---|---|
-| `/start` | Alle | Hauptmenü (rollenbasiert) |
-| `/orders` | Admin | Alle Bestellungen anzeigen |
-| `/orderid ORD-XXXXX` | Admin | Einzelne Bestellung öffnen |
-| `/id ORD-XXXXX` | Admin | Alias für /orderid |
-| `/deleteid ORD-XXXXX` | Admin | Bestellung löschen |
-| `/ban 123456789` | Admin | User sperren |
-| `/addadmin 123456789` | Master | Admin hinzufügen |
-
----
-
-## 🛡 Sicherheit
-
-- **Privnote-Adressen:** Versandadressen nur als selbstzerstörende Privnote-Links. Klartext wird automatisch gelöscht.
-- **Hierarchische Rechte:** Master → Admin → Kunde. Jede Aktion prüft die Rolle.
-- **Ban-System:** 48h Pending mit Master-Override. Gebannte User können den Bot nicht mehr nutzen.
-- **Approval-Workflow:** Admin-Aktionen (Preisänderungen, Löschungen) erfordern Master-Freigabe.
-
----
-
-## 📦 Tech Stack
-
-- **Runtime:** Node.js
-- **Bot Framework:** Telegraf v4 (WizardScene, Session)
-- **Datenbank:** Supabase (PostgreSQL)
-- **Hosting:** Render.com (mit Health-Check Server)
-
----
-
-**Powered by [t.me/autoacts](https://t.me/autoacts)** – *Sicherheit, Diskretion und Effizienz.*
+Powered by t.me/autoacts – Sicherheit, Diskretion und Effizienz.

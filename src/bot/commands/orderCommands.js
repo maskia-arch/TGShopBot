@@ -7,15 +7,26 @@ const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const notificationService = require('../../services/notificationService');
 
+async function clearOldNotifications(ctx, order) {
+    if (!order || !order.notification_msg_ids || order.notification_msg_ids.length === 0) return;
+    for (const msg of order.notification_msg_ids) {
+        try {
+            await ctx.telegram.deleteMessage(msg.chat_id, msg.message_id);
+        } catch (e) {}
+    }
+    await orderRepo.clearNotificationMsgIds(order.order_id);
+}
+
 module.exports = (bot) => {
 
-    // ── /orderid [ORD-XXXXX] ──
     bot.command('orderid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
             if (!args) return ctx.reply('⚠️ Beispiel: `/orderid ORD-00001`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply(`⚠️ Bestellung "${args}" nicht gefunden.`);
+            
+            await clearOldNotifications(ctx, order);
             await showOrderView(ctx, order);
         } catch (error) {
             console.error('OrderID Error:', error.message);
@@ -23,13 +34,14 @@ module.exports = (bot) => {
         }
     });
 
-    // ── /id (Alias) ──
     bot.command('id', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
             if (!args) return ctx.reply('⚠️ Beispiel: `/id ORD-00001`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply('⚠️ Nicht gefunden.');
+            
+            await clearOldNotifications(ctx, order);
             await showOrderView(ctx, order);
         } catch (error) {
             console.error('ID Error:', error.message);
@@ -37,7 +49,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── /deleteid [ORD-XXXXX] – UPDATE RUN #2: Rollenbasiert ──
     bot.command('deleteid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
@@ -49,11 +60,10 @@ module.exports = (bot) => {
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
 
             if (isMaster) {
-                // Master: Direkte Löschung
+                await clearOldNotifications(ctx, order);
                 await orderRepo.deleteOrder(args);
                 ctx.reply(`🗑 Bestellung \`${order.order_id}\` gelöscht.`, { parse_mode: 'Markdown' });
             } else {
-                // Admin: Approval-Anfrage an Master
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 const approval = await approvalRepo.createApprovalRequest(
                     'ORDER_DELETE', ctx.from.id, order.order_id, order.order_id
@@ -83,7 +93,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── /orders ──
     bot.command('orders', isAdmin, async (ctx) => {
         try {
             const orders = await orderRepo.getAllOrders(30);
@@ -98,7 +107,6 @@ module.exports = (bot) => {
 
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
             const keyboard = { inline_keyboard: [] };
-            // "Alle löschen" nur für Master
             if (isMaster) {
                 keyboard.inline_keyboard.push([{ text: '🗑 ALLE löschen', callback_data: 'orders_delete_all_confirm' }]);
             }
@@ -110,7 +118,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ── /ban [TelegramID] ──
     bot.command('ban', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
@@ -135,7 +142,6 @@ module.exports = (bot) => {
     });
 };
 
-// ── Helper: Order-View (für Commands) ──
 async function showOrderView(ctx, order) {
     const date = formatters.formatDate(order.created_at);
     let text = `📋 *Bestellung ${order.order_id}*\n\n`;

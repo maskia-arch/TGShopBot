@@ -10,15 +10,28 @@ const notificationService = require('../../services/notificationService');
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
     async (ctx) => {
+        // Initialer State
         ctx.wizard.state.productData = {
             categoryId: ctx.scene.state?.categoryId || null,
-            subcategoryId: null,
+            subcategoryId: ctx.scene.state?.subcategoryId || null,
             deliveryOption: 'none'
         };
 
-        if (!ctx.wizard.state.productData.categoryId) {
+        const pd = ctx.wizard.state.productData;
+
+        // Fall 1: Kategorie und Unterkategorie sind schon bekannt -> Direkt zum Namen
+        if (pd.categoryId && pd.subcategoryId !== null) {
+            await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+            });
+            ctx.wizard.state.step = 'name';
+            return ctx.wizard.next();
+        }
+
+        // Fall 2: Keine Kategorie bekannt -> Frage nach Kategorie
+        if (!pd.categoryId) {
             try {
-                // HIER GEFIXT: Wir nutzen productRepo statt categoryRepo
                 const categories = await productRepo.getActiveCategories();
                 if (categories && categories.length > 0) {
                     const keyboard = categories.map(c => ([{
@@ -37,9 +50,10 @@ const addProductScene = new Scenes.WizardScene(
             } catch (e) {}
         }
 
-        if (ctx.wizard.state.productData.categoryId) {
+        // Fall 3: Kategorie bekannt, aber Unterkategorie fehlt -> Frage nach Unterkategorie
+        if (pd.categoryId && pd.subcategoryId === null) {
             try {
-                const subcats = await subcategoryRepo.getSubcategoriesByCategory(ctx.wizard.state.productData.categoryId);
+                const subcats = await subcategoryRepo.getSubcategoriesByCategory(pd.categoryId);
                 if (subcats && subcats.length > 0) {
                     const keyboard = subcats.map(sc => ([{
                         text: sc.name, callback_data: `subcat_${sc.id}`
@@ -57,6 +71,7 @@ const addProductScene = new Scenes.WizardScene(
             } catch (e) {}
         }
 
+        // Fallback: Wenn keine DB-Einträge da sind, springe direkt zum Namen
         await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
@@ -111,13 +126,40 @@ const addProductScene = new Scenes.WizardScene(
             if (ctx.wizard.state.step === 'subcategory' && data.startsWith('subcat_')) {
                 ctx.answerCbQuery().catch(() => {});
                 const subcatId = data.replace('subcat_', '');
-                ctx.wizard.state.productData.subcategoryId = subcatId === 'none' ? null : subcatId;
+                ctx.wizard.state.productData.subcategoryId = subcatId === 'none' ? 'none' : subcatId;
 
                 await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
                 });
                 ctx.wizard.state.step = 'name';
+                return;
+            }
+
+            // Skip handling inside the step
+            if (ctx.wizard.state.step === 'description' && data === 'skip_desc') {
+                ctx.answerCbQuery().catch(() => {});
+                ctx.wizard.state.productData.description = null;
+                ctx.wizard.state.step = 'price';
+                await ctx.reply('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' });
+                return;
+            }
+
+            if (ctx.wizard.state.step === 'image' && data === 'skip_img') {
+                ctx.answerCbQuery().catch(() => {});
+                ctx.wizard.state.productData.imageUrl = null;
+                ctx.wizard.state.step = 'delivery';
+                await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
+                            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
+                            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
+                            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+                        ]
+                    }
+                });
                 return;
             }
 
@@ -134,7 +176,18 @@ const addProductScene = new Scenes.WizardScene(
                     ctx.wizard.state.productData.deliveryOption = deliveryMap[data];
                     try {
                         const pd = ctx.wizard.state.productData;
-                        const result = await productRepo.addProduct(pd);
+                        const subCatToSave = pd.subcategoryId === 'none' ? null : pd.subcategoryId;
+                        
+                        const result = await productRepo.addProduct({
+                            categoryId: pd.categoryId,
+                            subcategoryId: subCatToSave,
+                            name: pd.name,
+                            description: pd.description,
+                            price: pd.price,
+                            imageUrl: pd.imageUrl,
+                            deliveryOption: pd.deliveryOption
+                        });
+                        
                         const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
                         let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
 
@@ -175,14 +228,8 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        if (ctx.wizard.state.step === 'description') {
-            if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_desc') {
-                ctx.answerCbQuery().catch(() => {});
-                ctx.wizard.state.productData.description = null;
-            } else if (ctx.message?.text) {
-                ctx.wizard.state.productData.description = ctx.message.text.trim();
-            } else return;
-
+        if (ctx.wizard.state.step === 'description' && ctx.message?.text) {
+            ctx.wizard.state.productData.description = ctx.message.text.trim();
             ctx.wizard.state.step = 'price';
             await ctx.reply('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' });
             return;
@@ -202,20 +249,15 @@ const addProductScene = new Scenes.WizardScene(
             return;
         }
 
-        if (ctx.wizard.state.step === 'image') {
-            if (ctx.callbackQuery && ctx.callbackQuery.data === 'skip_img') {
-                ctx.answerCbQuery().catch(() => {});
+        if (ctx.wizard.state.step === 'image' && ctx.message?.photo) {
+            const photo = ctx.message.photo[ctx.message.photo.length - 1];
+            try {
+                const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+                ctx.wizard.state.productData.imageUrl = fileLink.href;
+            } catch (e) {
                 ctx.wizard.state.productData.imageUrl = null;
-            } else if (ctx.message?.photo) {
-                const photo = ctx.message.photo[ctx.message.photo.length - 1];
-                try {
-                    const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-                    ctx.wizard.state.productData.imageUrl = fileLink.href;
-                } catch (e) {
-                    ctx.wizard.state.productData.imageUrl = null;
-                }
-            } else return;
-
+            }
+            
             ctx.wizard.state.step = 'delivery';
             await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
                 parse_mode: 'Markdown',
@@ -233,13 +275,11 @@ const addProductScene = new Scenes.WizardScene(
     }
 );
 
+// Nur den generellen Cancel-Button hier unten lassen
 addProductScene.action('cancel_add', async (ctx) => {
     ctx.answerCbQuery('Abgebrochen').catch(() => {});
     await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
     return ctx.scene.leave();
 });
-
-addProductScene.action('skip_desc', async (ctx) => {});
-addProductScene.action('skip_img', async (ctx) => {});
 
 module.exports = addProductScene;

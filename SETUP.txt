@@ -2,22 +2,72 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.2.1
+Version: 0.3.7
 
---- 1. ENVIRONMENT VARIABLES (Render.com) ---
-Diese Variablen müssen im Render Dashboard unter "Environment" eingetragen werden:
+Diese Anleitung führt dich durch die komplette Neuinstallation 
+des Shop Bots von Null auf Hundert.
 
-TELEGRAM_BOT_TOKEN = (Dein Bot Token vom @BotFather)
-SUPABASE_URL       = (Deine Supabase Projekt URL)
-SUPABASE_KEY       = (Dein Service Role Key - WICHTIG: Service Role nutzen!)
-MASTER_ADMIN_ID    = (Deine numerische Telegram ID - Absolute Systemgewalt)
-VERSION            = 0.2.1
-PORT               = 10000
+=========================================
+ TEIL 1: VORBEREITUNG & ACCOUNTS
+=========================================
+
+1. TELEGRAM BOT TOKEN HOLEN
+   - Öffne Telegram und suche nach "@BotFather"
+   - Sende den Befehl /newbot
+   - Wähle einen Namen und einen Username (muss auf "bot" enden)
+   - Kopiere den HTTP API Token (z.B. 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)
+
+2. DATENBANK (SUPABASE) ERSTELLEN
+   - Gehe auf https://supabase.com und erstelle einen kostenlosen Account.
+   - Klicke auf "New Project", wähle einen Namen und ein sicheres Passwort.
+   - Gehe links in den Einstellungen (Zahnrad) auf "API".
+   - Kopiere die "Project URL" und den "service_role / secret" Key (NICHT den anon key!).
+
+3. TELEGRAM ID HERAUSFINDEN
+   - Suche in Telegram nach "@userinfobot" oder "@RawDataBot"
+   - Sende /start und kopiere deine numerische ID (z.B. 123456789)
+   - Das wird deine MASTER_ADMIN_ID.
+
+=========================================
+ TEIL 2: LOKAL ODER AUF SERVER INSTALLIEREN
+=========================================
+
+1. DATEIEN VORBEREITEN
+   - Entpacke/Klone den Code des Bots in einen Ordner auf deinem PC/Server.
+   - Öffne ein Terminal (Eingabeaufforderung) in diesem Ordner.
+
+2. ABHÄNGIGKEITEN INSTALLIEREN
+   - Stelle sicher, dass Node.js (Version 18+) installiert ist.
+   - Tippe im Terminal ein:
+     npm install
+
+3. HOSTING AUF RENDER.COM (Empfohlen)
+   - Erstelle einen Web Service auf Render.com.
+   - Verbinde dein GitHub-Repo oder lade den Code hoch.
+   - Build Command: npm install
+   - Start Command: node src/index.js
+   - Trage unter "Environment" folgende Variablen ein:
+
+     TELEGRAM_BOT_TOKEN = (Dein kopierter Bot Token)
+     SUPABASE_URL       = (Deine Supabase URL)
+     SUPABASE_KEY       = (Dein Service Role Key)
+     MASTER_ADMIN_ID    = (Deine Telegram ID)
+     VERSION            = 0.3.7
+     PORT               = 10000
+
+=========================================
+ TEIL 3: DATENBANK-SCHEMA INSTALLIEREN
+=========================================
+
+1. Gehe in dein Supabase-Dashboard.
+2. Klicke links im Menü auf den "SQL Editor".
+3. Klicke auf "New Query".
+4. Kopiere den KOMPLETTEN SQL-Code ab der nächsten Zeile bis ganz 
+   nach unten in das weiße Feld und klicke auf "Run" (oder drücke STRG+ENTER).
+
 
 -- ============================================================
--- TGShopBot v0.3.4 – KOMPLETTES SCHEMA (Neuinstallation)
--- Ausführen in: Supabase Dashboard → SQL Editor
---
+-- TGShopBot v0.3.7 – KOMPLETTES SCHEMA (Neuinstallation)
 -- WICHTIG: Dieses Script löscht ALLE bestehenden Tabellen
 -- und erstellt sie neu. NUR für Neuinstallation verwenden!
 -- ============================================================
@@ -97,6 +147,7 @@ CREATE TABLE products (
     image_url TEXT,
     is_active BOOLEAN DEFAULT true,
     delivery_option TEXT DEFAULT 'none',
+    sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -144,6 +195,7 @@ CREATE TABLE orders (
     delivery_method TEXT,
     tx_id TEXT,
     admin_notes JSONB DEFAULT '[]'::jsonb,
+    notification_msg_ids JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -246,6 +298,26 @@ BEGIN
     END LOOP;
 
     IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'sort_order'
+    ) THEN
+        RAISE NOTICE '✅ Spalte sort_order in products vorhanden';
+    ELSE
+        RAISE NOTICE '❌ Spalte sort_order in products fehlt';
+        all_ok := false;
+    END IF;
+    
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'notification_msg_ids'
+    ) THEN
+        RAISE NOTICE '✅ Spalte notification_msg_ids in orders vorhanden';
+    ELSE
+        RAISE NOTICE '❌ Spalte notification_msg_ids in orders fehlt';
+        all_ok := false;
+    END IF;
+
+    IF EXISTS (
         SELECT 1 FROM information_schema.triggers
         WHERE trigger_name = 'trigger_generate_order_id'
     ) THEN
@@ -267,9 +339,7 @@ BEGIN
 
     IF all_ok THEN
         RAISE NOTICE '══════════════════════════════════════';
-        RAISE NOTICE '✅ SCHEMA v0.3.4 KOMPLETT INSTALLIERT';
+        RAISE NOTICE '✅ SCHEMA v0.3.7 KOMPLETT INSTALLIERT';
         RAISE NOTICE '══════════════════════════════════════';
     END IF;
 END $$;
-
-=========================================
