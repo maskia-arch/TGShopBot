@@ -1,6 +1,5 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
-const categoryRepo = require('../../database/repositories/categoryRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const imageUploader = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
@@ -19,7 +18,8 @@ const addProductScene = new Scenes.WizardScene(
 
         if (!ctx.wizard.state.productData.categoryId) {
             try {
-                const categories = await categoryRepo.getAllCategories();
+                // HIER GEFIXT: Wir nutzen productRepo statt categoryRepo
+                const categories = await productRepo.getActiveCategories();
                 if (categories && categories.length > 0) {
                     const keyboard = categories.map(c => ([{
                         text: c.name, callback_data: `cat_${c.id}`
