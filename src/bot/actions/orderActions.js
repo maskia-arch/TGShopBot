@@ -164,9 +164,10 @@ module.exports = (bot) => {
             text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
             text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
 
-            if (order.delivery_method === 'shipping') text += `🚚 Lieferung: Versand\n`;
-            else if (order.delivery_method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
-            else if (order.delivery_method === 'none') text += `📱 Lieferung: Digital\n`;
+            const method = order.delivery_method;
+            if (method === 'shipping') text += `🚚 Lieferung: Versand\n`;
+            else if (method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
+            else if (method === 'none' || !method) text += `📱 Lieferung: Digital\n`;
 
             if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
             if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
@@ -189,7 +190,8 @@ module.exports = (bot) => {
             const keyboard = { inline_keyboard: [] };
             keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
 
-            if (order.delivery_method === 'none') {
+            // Hier wird der Button für digitale Lieferung erzwungen, wenn die Methode 'none' ist
+            if (method === 'none' || !method) {
                 keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
             }
 
@@ -211,7 +213,6 @@ module.exports = (bot) => {
             console.error('Order View Error:', error.message);
         }
     });
-
     bot.action(/^ostatus_(ORD-\d+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -276,6 +277,7 @@ module.exports = (bot) => {
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
+
     bot.action(/^odelivery_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -577,7 +579,9 @@ module.exports = (bot) => {
                 const order = await orderRepo.getOrderByOrderId(orderId);
                 if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
 
-                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, input);
+                // Hier wird der Input formatiert (Kommata werden für die Ansicht schön getrennt)
+                const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
+                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
                 const sent = await notificationService.sendTo(order.user_id, customerMessage, { parse_mode: 'Markdown' });
 
                 if (sent) {

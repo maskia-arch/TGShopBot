@@ -12,9 +12,9 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             status: 'offen',
             shipping_link: shippingLink || null,
             payment_method_name: paymentMethodName || 'Nicht angegeben',
-            delivery_method: deliveryMethod || null,
+            delivery_method: deliveryMethod || 'none',
             admin_notes: [],
-            notification_msg_ids: [] // Neues Feld initialisieren
+            notification_msg_ids: []
         }])
         .select('id, order_id, status');
 
@@ -146,8 +146,6 @@ const getAllOrders = async (limit = 50) => {
     if (error) throw error;
     return data || [];
 };
-
-// --- NEUE FUNKTIONEN FÜR INTELLIGENTES LÖSCHEN ---
 
 const addNotificationMsgId = async (orderId, chatId, messageId) => {
     try {
