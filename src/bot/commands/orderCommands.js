@@ -118,7 +118,6 @@ module.exports = (bot) => {
             orders.forEach((order, i) => {
                 const date = new Date(order.created_at).toLocaleDateString('de-DE');
                 const txBadge = order.status === 'bezahlt_pending' ? '💸 ' : '';
-                // Geändert: Die Order-ID wird nun direkt als /Befehl ausgegeben für 1-Klick-Zugriff
                 text += `${i + 1}. ${txBadge}/${order.order_id} | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)} | ${date}\n`;
             });
 
@@ -159,24 +158,31 @@ module.exports = (bot) => {
     });
 };
 
+// VEREINHEITLICHTE VIEW (Identisch mit orderActions.js)
 async function showOrderView(ctx, order) {
     const date = formatters.formatDate(order.created_at);
-    let text = `📋 *Bestellung #${order.order_id}*\n\n`; // Hash vor der ID für besseren Look
-    text += `👤 Kunde: ID ${order.user_id}\n📅 ${date}\n`;
-    text += `💰 ${formatters.formatPrice(order.total_amount)}\n`;
-    text += `💳 ${order.payment_method_name || 'N/A'}\n`;
-    text += `📦 ${texts.getStatusLabel(order.status)}\n`;
-    if (order.delivery_method === 'shipping') text += `🚚 Versand\n`;
-    else if (order.delivery_method === 'pickup') text += `🏪 Abholung\n`;
+    let text = `📋 *Bestellung #${order.order_id}*\n\n`;
+    text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
+    text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
+    text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
+    text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
+
+    const method = order.delivery_method;
+    if (method === 'shipping') text += `🚚 Lieferung: Versand\n`;
+    else if (method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
+    else if (method === 'none' || !method) text += `📱 Lieferung: Digital\n`;
+
     if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
-    if (order.tx_id) text += `\n🔑 TX: \`${order.tx_id}\``;
+    if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
 
     if (order.admin_notes && order.admin_notes.length > 0) {
         text += `\n\n📝 *Notizen:*`;
         order.admin_notes.forEach((note, i) => {
-            text += `\n${i + 1}. _${note.author}_: ${note.text}`;
+            const nd = new Date(note.date).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
+            text += `\n${i + 1}. _${note.author}_ (${nd}): ${note.text}`;
         });
     }
+
     if (order.details && order.details.length > 0) {
         text += `\n\n*Artikel:*`;
         order.details.forEach(item => {
@@ -184,23 +190,30 @@ async function showOrderView(ctx, order) {
         });
     }
 
-    await ctx.reply(text, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true,
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: '👤 Kontakt', url: `tg://user?id=${order.user_id}` }],
-                [
-                    { text: '⚙️ Bearb.', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
-                    { text: '📦 Versand', callback_data: `ostatus_${order.order_id}_versand` }
-                ],
-                [
-                    { text: '✅ Fertig', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
-                    { text: '❌ Abbruch', callback_data: `ostatus_${order.order_id}_abgebrochen` }
-                ],
-                [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
-                [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
-            ]
-        }
+    const keyboard = { inline_keyboard: [] };
+    keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
+
+    // Digitaler Lieferbutton (Logik aus Actions übernommen)
+    if (method === 'none' || !method) {
+        keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
+    }
+
+    keyboard.inline_keyboard.push(
+        [
+            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
+            { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
+        ],
+        [
+            { text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` },
+            { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }
+        ],
+        [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }],
+        [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }]
+    );
+
+    await ctx.reply(text, { 
+        parse_mode: 'Markdown', 
+        reply_markup: keyboard, 
+        disable_web_page_preview: true 
     });
 }

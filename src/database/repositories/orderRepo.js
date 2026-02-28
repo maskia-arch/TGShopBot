@@ -1,27 +1,23 @@
 const supabase = require('../supabaseClient');
 const crypto = require('crypto');
 
-// Hilfsfunktion zur Generierung der neuen Order-ID (z.B. order26lc54)
+// Hilfsfunktion zur Generierung der neuen Order-ID (z.B. order4f8a2c)
 const generateCustomOrderId = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 6; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return `order${result}`;
+    // Generiert 3 zufällige Bytes und wandelt sie in einen 6-stelligen Hex-String (0-9, a-f) um
+    return 'order' + crypto.randomBytes(3).toString('hex');
 };
 
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod } = options;
     
-    // Generiere die neue, attraktive Order-ID
+    // Generiere die neue, kryptografisch sichere Order-ID
     const customId = generateCustomOrderId();
 
     const { data, error } = await supabase
         .from('orders')
         .insert([{
             user_id: userId,
-            order_id: customId, // Wir setzen die ID jetzt manuell beim Insert
+            order_id: customId,
             total_amount: totalAmount,
             details: orderDetails,
             status: 'offen',

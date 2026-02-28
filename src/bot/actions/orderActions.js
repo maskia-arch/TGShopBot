@@ -40,7 +40,7 @@ module.exports = (bot) => {
             orders.forEach((order, i) => {
                 const date = new Date(order.created_at).toLocaleDateString('de-DE');
                 const statusLabel = texts.getCustomerStatusLabel(order.status);
-                text += `${i + 1}. \`${order.order_id}\`\n`;
+                text += `${i + 1}. \`#${order.order_id}\`\n`;
                 text += `💰 ${formatters.formatPrice(order.total_amount)} | ${statusLabel}\n`;
                 if (order.delivery_method === 'shipping') text += `🚚 Versand\n`;
                 else if (order.delivery_method === 'pickup') text += `🏪 Abholung\n`;
@@ -158,7 +158,7 @@ module.exports = (bot) => {
             await clearOldNotifications(ctx, order);
 
             const date = formatters.formatDate(order.created_at);
-            let text = `📋 *Bestellung ${order.order_id}*\n\n`;
+            let text = `📋 *Bestellung #${order.order_id}*\n\n`;
             text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
             text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
             text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
@@ -190,7 +190,6 @@ module.exports = (bot) => {
             const keyboard = { inline_keyboard: [] };
             keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
 
-            // Hier wird der Button für digitale Lieferung erzwungen, wenn die Methode 'none' ist
             if (method === 'none' || !method) {
                 keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
             }
@@ -213,7 +212,8 @@ module.exports = (bot) => {
             console.error('Order View Error:', error.message);
         }
     });
-    bot.action(/^ostatus_(ORD-\d+)_(.+)$/, isAdmin, async (ctx) => {
+
+    bot.action(/^ostatus_(order[a-z0-9]{6})_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const newStatus = ctx.match[2];
@@ -225,7 +225,7 @@ module.exports = (bot) => {
                 ctx.answerCbQuery().catch(() => {});
                 await ctx.reply(
                     `⚠️ *Sicherheitsabfrage*\n\n` +
-                    `Bestellung \`${orderId}\` hat den finalen Status: ${texts.getStatusLabel(order.status)}\n\n` +
+                    `Bestellung \`#${orderId}\` hat den finalen Status: ${texts.getStatusLabel(order.status)}\n\n` +
                     `Wirklich auf *${texts.getStatusLabel(newStatus)}* ändern?`,
                     {
                         parse_mode: 'Markdown',
@@ -240,12 +240,18 @@ module.exports = (bot) => {
                 return;
             }
 
+            await clearOldNotifications(ctx, order);
+
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
             if (!updated) return ctx.answerCbQuery('Fehler.', { show_alert: true });
 
-            notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus).catch(() => {});
+            const sentMsg = await notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus);
+            if (sentMsg) {
+                await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
+            }
+
             ctx.answerCbQuery(`✅ ${texts.getStatusLabel(newStatus)}`).catch(() => {});
-            await ctx.reply(`✅ \`${orderId}\` → ${texts.getStatusLabel(newStatus)}`, {
+            await ctx.reply(`✅ \`#${orderId}\` → ${texts.getStatusLabel(newStatus)}`, {
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
             });
@@ -255,20 +261,29 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^ostatus_force_(ORD-\d+)_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^ostatus_force_(order[a-z0-9]{6})_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const newStatus = ctx.match[2];
 
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (!order) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
+
+            await clearOldNotifications(ctx, order);
+
             const updated = await orderRepo.updateOrderStatus(orderId, newStatus);
-            if (!updated) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
+            if (!updated) return ctx.answerCbQuery('Fehler.', { show_alert: true });
 
             const authorName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
             await orderRepo.addAdminNote(orderId, authorName, `Status von finalem Status geändert → ${newStatus}`);
 
-            notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus).catch(() => {});
+            const sentMsg = await notificationService.notifyCustomerStatusUpdate(updated.user_id, orderId, newStatus);
+            if (sentMsg) {
+                await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
+            }
+
             ctx.answerCbQuery(`✅ ${texts.getStatusLabel(newStatus)}`).catch(() => {});
-            await ctx.reply(`✅ \`${orderId}\` → ${texts.getStatusLabel(newStatus)} _(finaler Status überschrieben)_`, {
+            await ctx.reply(`✅ \`#${orderId}\` → ${texts.getStatusLabel(newStatus)} _(finaler Status überschrieben)_`, {
                 parse_mode: 'Markdown',
                 reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
             });
@@ -316,13 +331,13 @@ module.exports = (bot) => {
         await ctx.reply('❌ Abgebrochen.');
     });
 
-    bot.action(/^odel_confirm_(ORD-\d+)$/, isMasterAdmin, async (ctx) => {
+    bot.action(/^odel_confirm_(order[a-z0-9]{6})$/, isMasterAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         try {
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) {
                 ctx.answerCbQuery('Bereits gelöscht.').catch(() => {});
-                await ctx.editMessageText(`🗑 \`${orderId}\` wurde bereits gelöscht.`, { parse_mode: 'Markdown' });
+                await ctx.editMessageText(`🗑 \`#${orderId}\` wurde bereits gelöscht.`, { parse_mode: 'Markdown' });
                 return;
             }
 
@@ -330,7 +345,7 @@ module.exports = (bot) => {
             await orderRepo.deleteOrder(orderId);
             ctx.answerCbQuery('🗑 Gelöscht!').catch(() => {});
 
-            await ctx.editMessageText(`🗑 Bestellung \`${orderId}\` wurde endgültig gelöscht.`, { parse_mode: 'Markdown' });
+            await ctx.editMessageText(`🗑 Bestellung \`#${orderId}\` wurde endgültig gelöscht.`, { parse_mode: 'Markdown' });
         } catch (error) {
             console.error('Order Delete Confirm Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
@@ -353,11 +368,11 @@ module.exports = (bot) => {
 
             await approvalRepo.updateApprovalStatus(approvalId, 'approved');
             ctx.answerCbQuery('✅ Genehmigt & gelöscht!').catch(() => {});
-            await ctx.editMessageText(`✅ Löschanfrage genehmigt.\n🗑 \`${orderId}\` wurde gelöscht.`, { parse_mode: 'Markdown' });
+            await ctx.editMessageText(`✅ Löschanfrage genehmigt.\n🗑 \`#${orderId}\` wurde gelöscht.`, { parse_mode: 'Markdown' });
 
             const adminId = approval.requested_by;
             notificationService.sendTo(adminId,
-                `✅ Deine Löschanfrage für \`${orderId}\` wurde vom Master *genehmigt*.\n🗑 Bestellung wurde gelöscht.`,
+                `✅ Deine Löschanfrage für \`#${orderId}\` wurde vom Master *genehmigt*.\n🗑 Bestellung wurde gelöscht.`,
                 { parse_mode: 'Markdown' }
             ).catch(() => {});
         } catch (error) {
@@ -375,11 +390,11 @@ module.exports = (bot) => {
 
             await approvalRepo.updateApprovalStatus(approvalId, 'rejected');
             ctx.answerCbQuery('❌ Abgelehnt.').catch(() => {});
-            await ctx.editMessageText(`❌ Löschanfrage für \`${approval.new_value}\` wurde abgelehnt.`, { parse_mode: 'Markdown' });
+            await ctx.editMessageText(`❌ Löschanfrage für \`#${approval.new_value}\` wurde abgelehnt.`, { parse_mode: 'Markdown' });
 
             const adminId = approval.requested_by;
             notificationService.sendTo(adminId,
-                `❌ Deine Löschanfrage für \`${approval.new_value}\` wurde vom Master *abgelehnt*.\nDie Bestellung bleibt bestehen.`,
+                `❌ Deine Löschanfrage für \`#${approval.new_value}\` wurde vom Master *abgelehnt*.\nDie Bestellung bleibt bestehen.`,
                 { parse_mode: 'Markdown' }
             ).catch(() => {});
         } catch (error) {
@@ -388,13 +403,13 @@ module.exports = (bot) => {
         }
     });
 
-    bot.action(/^odel_(ORD-\d+)$/, isAdmin, async (ctx) => {
+    bot.action(/^odel_(order[a-z0-9]{6})$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         const orderId = ctx.match[1];
         const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
 
         if (isMaster) {
-            await ctx.reply(`⚠️ \`${orderId}\` endgültig löschen?`, {
+            await ctx.reply(`⚠️ \`#${orderId}\` endgültig löschen?`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
@@ -412,14 +427,14 @@ module.exports = (bot) => {
 
                 await ctx.reply(
                     `📨 *Löschanfrage gesendet*\n\n` +
-                    `Bestellung \`${orderId}\` kann nur vom Master gelöscht werden.\n` +
+                    `Bestellung \`#${orderId}\` kann nur vom Master gelöscht werden.\n` +
                     `Der Master wurde benachrichtigt.`,
                     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: `oview_${orderId}` }]] } }
                 );
 
                 notificationService.sendTo(config.MASTER_ADMIN_ID,
                     `🗑 *Löschanfrage*\n\n` +
-                    `Admin: ${adminName}\nBestellung: \`${orderId}\`\n\nSoll die Bestellung gelöscht werden?`,
+                    `Admin: ${adminName}\nBestellung: \`#${orderId}\`\n\nSoll die Bestellung gelöscht werden?`,
                     {
                         parse_mode: 'Markdown',
                         reply_markup: {
@@ -492,7 +507,7 @@ module.exports = (bot) => {
                 text += `💰 Umsatz: ${formatters.formatPrice(total)}\n📬 Offen: ${active.length}\n`;
                 text += `\n*Letzte Bestellungen:*\n`;
                 orders.slice(0, 5).forEach((o, i) => {
-                    text += `${i + 1}. /orderid ${o.order_id} | ${formatters.formatPrice(o.total_amount)} | ${texts.getStatusLabel(o.status)}\n`;
+                    text += `${i + 1}. /${o.order_id} | ${formatters.formatPrice(o.total_amount)} | ${texts.getStatusLabel(o.status)}\n`;
                 });
             }
             await ctx.reply(text, {
@@ -579,13 +594,17 @@ module.exports = (bot) => {
                 const order = await orderRepo.getOrderByOrderId(orderId);
                 if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
 
+                await clearOldNotifications(ctx, order);
+
                 // Hier wird der Input formatiert (Kommata werden für die Ansicht schön getrennt)
                 const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
                 const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
-                const sent = await notificationService.sendTo(order.user_id, customerMessage, { parse_mode: 'Markdown' });
+                const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown' }).catch(() => null);
 
-                if (sent) {
+                if (sentMsg) {
                     await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+                    await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
+                    
                     const author = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                     await orderRepo.addAdminNote(orderId, author, `Digitale Lieferung erfolgreich an Kunde gesendet.`);
                     

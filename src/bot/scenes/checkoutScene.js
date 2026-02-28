@@ -12,7 +12,7 @@ const isPrivnoteLink = (text) => {
 };
 
 // ════════════════════════════════════════════
-// CHECKOUT SCENE v0.3.4
+// CHECKOUT SCENE v0.3.7
 // State Machine: init → delivery_choice → shipping_address → payment_select → payment_confirm
 // ════════════════════════════════════════════
 
@@ -77,6 +77,7 @@ const checkoutScene = new Scenes.WizardScene(
                 await showPaymentSelection(ctx);
             } else {
                 // Digital → direkt zur Zahlung
+                ctx.wizard.state.deliveryMethod = 'none';
                 await showPaymentSelection(ctx);
             }
 
@@ -257,7 +258,7 @@ async function finalizeOrder(ctx) {
         const walletAddress = paymentMethod ? paymentMethod.wallet_address : null;
         const deliveryMethod = ctx.wizard.state.deliveryMethod;
 
-        // Order erstellen – OHNE payment_method_id (UUID-Problem vermeiden)
+        // Order erstellen (generiert orderXXXXXX)
         const order = await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails, {
             shippingLink: ctx.wizard.state.shippingLink,
             paymentMethodName: paymentMethodName,
@@ -267,7 +268,7 @@ async function finalizeOrder(ctx) {
         // Warenkorb leeren
         await cartRepo.clearCart(userId);
 
-        // ── KUNDEN-RECEIPT (persistent, wird NICHT gelöscht) ──
+        // ── KUNDEN-RECEIPT ──
         const receiptText = texts.getCustomerInvoice({
             orderId: order.order_id,
             total: parseFloat(cartTotal).toFixed(2),
@@ -276,7 +277,8 @@ async function finalizeOrder(ctx) {
             deliveryMethod: deliveryMethod
         });
 
-        await ctx.reply(receiptText, {
+        // Hier fangen wir die gesendete Nachricht ab
+        const sentReceipt = await ctx.reply(receiptText, {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
@@ -286,6 +288,11 @@ async function finalizeOrder(ctx) {
                 ]
             }
         });
+
+        // Füge die Message-ID des Receipts zur Datenbank hinzu, damit es beim nächsten Status-Update gelöscht wird
+        if (sentReceipt) {
+            await orderRepo.addNotificationMsgId(order.order_id, sentReceipt.chat.id, sentReceipt.message_id);
+        }
 
         // ── ADMIN-BENACHRICHTIGUNG ──
         notificationService.notifyAdminsNewOrder({
