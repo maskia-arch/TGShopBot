@@ -1,5 +1,6 @@
 const userRepo = require('../../database/repositories/userRepo');
 const orderRepo = require('../../database/repositories/orderRepo');
+const settingsRepo = require('../../database/repositories/settingsRepo');
 const masterMenu = require('../keyboards/masterMenu');
 const adminMenu = require('../keyboards/adminMenu');
 const customerMenu = require('../keyboards/customerMenu');
@@ -16,14 +17,34 @@ module.exports = (bot) => {
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
             if (!isMaster) {
-                const banned = await userRepo.isUserBanned(userId);
-                if (banned) {
-                    return ctx.reply(texts.getBannedMessage()).catch(() => {});
-                }
+                try {
+                    const banned = await userRepo.isUserBanned(userId);
+                    if (banned) {
+                        return ctx.reply(texts.getBannedMessage()).catch(() => {});
+                    }
+                } catch (e) {}
+            }
+
+            let isNewUser = false;
+            try {
+                const existingRole = await userRepo.getUserRole(userId);
+                if (!existingRole) isNewUser = true;
+            } catch (error) {
+                isNewUser = true;
             }
 
             await userRepo.upsertUser(userId, username);
             const role = await userRepo.getUserRole(userId);
+
+            if (isNewUser) {
+                try {
+                    const welcomeMsg = await settingsRepo.getSetting('welcome_message');
+                    if (welcomeMsg) {
+                        const pinnedMsg = await ctx.reply(welcomeMsg, { parse_mode: 'Markdown' });
+                        await ctx.pinChatMessage(pinnedMsg.message_id, { disable_notification: true }).catch(() => {});
+                    }
+                } catch (e) {}
+            }
 
             const text = texts.getWelcomeText(isMaster, role);
             let keyboard;

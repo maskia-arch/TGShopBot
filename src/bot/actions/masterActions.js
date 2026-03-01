@@ -203,6 +203,15 @@ module.exports = (bot) => {
         await ctx.deleteMessage().catch(() => {});
     });
 
+    bot.action('master_edit_welcome_msg', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('editWelcomeMsgScene');
+        } catch (error) { 
+            console.error(error.message); 
+        }
+    });
+
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.session.awaitingAdminId || ctx.from.id !== Number(config.MASTER_ADMIN_ID)) return next();
         const targetId = ctx.message.text.trim();
