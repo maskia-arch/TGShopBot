@@ -369,10 +369,18 @@ module.exports = (bot) => {
 
             if (product.image_url) {
                 if (hasMedia) {
-                    await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {});
+                    await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
+                        await ctx.deleteMessage().catch(() => {});
+                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
+                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
+                        });
+                    });
                 } else {
                     await ctx.deleteMessage().catch(() => {});
-                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
+                        .catch(async () => {
+                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
+                        });
                 }
             } else {
                 if (hasMedia) {
@@ -383,7 +391,7 @@ module.exports = (bot) => {
                 }
             }
         } catch (error) { 
-            console.error(error.message); 
+            console.error('Admin Edit Prod Error:', error.message); 
         }
     });
 

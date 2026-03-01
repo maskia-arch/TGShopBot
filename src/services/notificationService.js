@@ -40,7 +40,6 @@ const notifyCustomerStatusUpdate = async (userId, orderId, newStatus) => {
 const notifyAdminsNewOrder = async (data) => {
     try {
         const admins = await userRepo.getAllAdmins();
-
         const text = texts.getAdminNewOrderNotify({
             ...data,
             total: data.total || '0.00',
@@ -48,45 +47,25 @@ const notifyAdminsNewOrder = async (data) => {
         });
 
         const keyboard = {
-            inline_keyboard: [
-                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
-            ]
+            inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]]
         };
 
-        const notifyPromises = [];
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
 
-        for (const admin of admins) {
-            const p = sendTo(admin.telegram_id, text, {
-                reply_markup: keyboard, disable_web_page_preview: true
-            }).then(msg => {
-                if (msg && msg.message_id) {
-                    return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
-                }
-            }).catch(() => {});
-            notifyPromises.push(p);
+        for (const id of targetIds) {
+            sendTo(id, text, { reply_markup: keyboard, disable_web_page_preview: true })
+                .then(msg => {
+                    if (msg && msg.message_id) orderRepo.addNotificationMsgId(data.orderId, id, msg.message_id);
+                }).catch(() => {});
         }
-
-        if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-            const p = sendTo(config.MASTER_ADMIN_ID, text, {
-                reply_markup: keyboard, disable_web_page_preview: true
-            }).then(msg => {
-                if (msg && msg.message_id) {
-                    return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
-                }
-            }).catch(() => {});
-            notifyPromises.push(p);
-        }
-        
-        await Promise.all(notifyPromises);
     } catch (error) {
-        console.error('Notify Admins New Order Error:', error.message);
+        console.error('Notify New Order Error:', error.message);
     }
 };
-
 const notifyAdminsTxId = async (data) => {
     try {
         const order = await orderRepo.getOrderByOrderId(data.orderId);
-        
         const safeData = {
             orderId: data.orderId,
             userId: data.userId || (order ? order.user_id : 'Unbekannt'),
@@ -97,7 +76,6 @@ const notifyAdminsTxId = async (data) => {
         };
 
         const text = texts.getAdminTxIdNotify(safeData);
-
         const keyboard = {
             inline_keyboard: [
                 [{ text: '📋 Bestellung öffnen', callback_data: `oview_${safeData.orderId}` }],
@@ -105,43 +83,24 @@ const notifyAdminsTxId = async (data) => {
             ]
         };
 
-        if (order && order.notification_msg_ids && order.notification_msg_ids.length > 0) {
-            const updatePromises = order.notification_msg_ids.map(async (notif) => {
-                const edited = await editAdminMessage(notif.chat_id, notif.message_id, text, { reply_markup: keyboard });
-                if (!edited) {
-                    const msg = await sendTo(notif.chat_id, text, { reply_markup: keyboard });
-                    if (msg && msg.message_id) {
-                        return { chat_id: notif.chat_id, message_id: msg.message_id };
-                    }
-                }
-                return notif;
-            });
-            
-            await Promise.all(updatePromises);
-            
-        } else {
-            const admins = await userRepo.getAllAdmins();
-            const notifyPromises = [];
+        const admins = await userRepo.getAllAdmins();
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
 
-            for (const admin of admins) {
-                const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
-                    if (msg && msg.message_id) {
-                        return orderRepo.addNotificationMsgId(safeData.orderId, admin.telegram_id, msg.message_id);
-                    }
-                }).catch(() => {});
-                notifyPromises.push(p);
+        if (order && order.notification_msg_ids && order.notification_msg_ids.length > 0) {
+            for (const notif of order.notification_msg_ids) {
+                editAdminMessage(notif.chat_id, notif.message_id, text, { reply_markup: keyboard })
+                    .then(res => {
+                        if (!res) sendTo(notif.chat_id, text, { reply_markup: keyboard });
+                    }).catch(() => sendTo(notif.chat_id, text, { reply_markup: keyboard }));
             }
-            
-            if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-                 const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
-                    if (msg && msg.message_id) {
-                         return orderRepo.addNotificationMsgId(safeData.orderId, config.MASTER_ADMIN_ID, msg.message_id);
-                    }
-                }).catch(() => {});
-                notifyPromises.push(p);
+        } else {
+            for (const id of targetIds) {
+                sendTo(id, text, { reply_markup: keyboard })
+                    .then(msg => {
+                        if (msg && msg.message_id) orderRepo.addNotificationMsgId(safeData.orderId, id, msg.message_id);
+                    }).catch(() => {});
             }
-            
-            await Promise.all(notifyPromises);
         }
     } catch (error) {
         console.error('Notify TxId Error:', error.message);
@@ -150,64 +109,18 @@ const notifyAdminsTxId = async (data) => {
 
 const notifyAdminsPing = async (data) => {
     try {
-        const admins = await userRepo.getAllAdmins();
         const text = texts.getAdminPingNotify(data);
         const keyboard = { inline_keyboard: [
             [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
             [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
         ]};
-        
-        const notifyPromises = [];
-        
-        for (const admin of admins) {
-            const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
-            }).catch(() => {});
-            notifyPromises.push(p);
-        }
-        
-        if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-            const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
-            }).catch(() => {});
-            notifyPromises.push(p);
-        }
-        
-        await Promise.all(notifyPromises);
-    } catch (error) {
-        console.error('Notify Ping Error:', error.message);
-    }
-};
-
-const notifyAdminsContact = async (data) => {
-    try {
         const admins = await userRepo.getAllAdmins();
-        const text = texts.getAdminContactNotify(data);
-        const keyboard = { inline_keyboard: [
-            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
-        ]};
-        
-        const notifyPromises = [];
-        
-        for (const admin of admins) {
-            const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
-            }).catch(() => {});
-            notifyPromises.push(p);
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
+        for (const id of targetIds) {
+            sendTo(id, text, { reply_markup: keyboard });
         }
-        
-        if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-            const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
-            }).catch(() => {});
-            notifyPromises.push(p);
-        }
-        
-        await Promise.all(notifyPromises);
-    } catch (error) {
-        console.error('Notify Contact Error:', error.message);
-    }
+    } catch (error) { console.error(error.message); }
 };
 
 const notifyMasterBan = async (data) => {
@@ -217,70 +130,25 @@ const notifyMasterBan = async (data) => {
             [{ text: '↩️ Ban aufheben', callback_data: `master_revert_ban_${data.banId}` }],
             [{ text: '✅ Sofort bestätigen', callback_data: `master_confirm_ban_${data.banId}` }]
         ]};
-        sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});
-    } catch (error) {
-        console.error('Notify Master Ban Error:', error.message);
-    }
-};
-
-const notifyAdminsNewProduct = async (data) => {
-    try {
-        const text = texts.getAdminNewProductNotify(data);
-        const keyboard = {
-            inline_keyboard: [
-                [{ text: '↩️ Rückgängig', callback_data: `master_undo_prod_${data.productId}` }],
-                [{ text: '✅ Gelesen', callback_data: 'master_ack_msg' }]
-            ]
-        };
-        sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});
-    } catch (error) {
-        console.error('Notify New Product Error:', error.message);
-    }
+        sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard });
+    } catch (error) { console.error(error.message); }
 };
 
 const sendBroadcast = async (text, adminId) => {
     try {
         const customers = await userRepo.getAllCustomers();
-        
-        if (!customers || customers.length === 0) {
-            await sendTo(adminId, '⚠️ Es wurden keine registrierten Kunden gefunden.');
-            return;
-        }
-
+        if (!customers || customers.length === 0) return sendTo(adminId, '⚠️ Keine Kunden gefunden.');
         let successCount = 0;
-        let failCount = 0;
-        let blockCount = 0;
-        const promises = customers.map(async (customer) => {
-            const result = await sendTo(customer.telegram_id, text);
-            if (result) {
-                successCount++;
-            } else {
-                failCount++;
-                blockCount++;
-            }
-        });
-
-        await Promise.all(promises);
-
-        const reportText = texts.getBroadcastReport({
-            successCount,
-            failCount,
-            blockCount
-        });
-
-        await sendTo(adminId, reportText);
-        
-    } catch (error) {
-        console.error('Broadcast Error:', error.message);
-        await sendTo(adminId, '❌ Ein Fehler ist beim Ausführen des Broadcasts aufgetreten.');
-    }
+        for (const customer of customers) {
+            const res = await sendTo(customer.telegram_id, text);
+            if (res) successCount++;
+        }
+        await sendTo(adminId, `📢 Broadcast beendet. Erreicht: ${successCount}/${customers.length}`);
+    } catch (error) { console.error(error.message); }
 };
 
 module.exports = {
-    init, sendTo,
-    sendOrderReceipt, notifyCustomerStatusUpdate,
-    notifyAdminsNewOrder, notifyAdminsTxId,
-    notifyAdminsPing, notifyAdminsContact,
-    notifyMasterBan, notifyAdminsNewProduct,
-    sendBroadcast
+    init, sendTo, sendOrderReceipt, notifyCustomerStatusUpdate,
+    notifyAdminsNewOrder, notifyAdminsTxId, notifyAdminsPing,
+    notifyMasterBan, sendBroadcast
 };

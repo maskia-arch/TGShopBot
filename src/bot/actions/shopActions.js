@@ -90,7 +90,7 @@ module.exports = (bot) => {
         try {
             const categoryId = ctx.match[1];
             const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
-            const keyboard = [];
+            let keyboard = [];
             const text = 'Wähle eine Option:';
 
             if (subcats.length > 0) {
@@ -145,7 +145,7 @@ module.exports = (bot) => {
             });
             keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
             
-            const title = `📂 *${subcat?.name || ''}*`;
+            const title = `📂 *${subcat ? subcat.name : ''}*`;
             await ctx.editMessageText(title, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } })
                 .catch(async () => {
                     await ctx.deleteMessage().catch(() => {});
@@ -162,13 +162,14 @@ module.exports = (bot) => {
 
             let path = '';
             try {
-                const categories = await productRepo.getActiveCategories();
-                const cat = categories.find(c => String(c.id) === String(product.category_id));
-                path = cat ? cat.name : '';
-                
-                if (product.subcategory_id) {
-                    const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
-                    if (subcat) path += ` » ${subcat.name}`;
+                if (product.category_id) {
+                    const categories = await productRepo.getActiveCategories();
+                    const cat = categories.find(c => String(c.id) === String(product.category_id));
+                    path = cat ? cat.name : '';
+                    if (product.subcategory_id) {
+                        const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
+                        if (subcat) path += ` » ${subcat.name}`;
+                    }
                 }
             } catch (e) {}
 
@@ -177,9 +178,11 @@ module.exports = (bot) => {
             text += `\n💰 ${formatters.formatPrice(product.price)}`;
             if (product.description) text += `\n\n📝 ${product.description}`;
             
-            const backCb = product.subcategory_id ? `subcategory_${product.subcategory_id}` : product.category_id ? `category_${product.category_id}` : 'shop_menu';
-            const keyboard = { inline_keyboard: [] };
+            const backCb = product.subcategory_id 
+                ? `subcategory_${product.subcategory_id}` 
+                : (product.category_id ? `category_${product.category_id}` : 'shop_menu');
             
+            const keyboard = { inline_keyboard: [] };
             if (!product.is_out_of_stock) {
                 keyboard.inline_keyboard.push([{ text: '🛒 In den Warenkorb', callback_data: `add_to_cart_${product.id}` }]);
             } else {
@@ -187,20 +190,30 @@ module.exports = (bot) => {
             }
             keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
 
-            await ctx.deleteMessage().catch(() => {});
+            const hasMedia = ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation);
 
             if (product.image_url) {
-                const fileId = product.image_url;
-                try {
-                    await ctx.replyWithAnimation(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
-                        .catch(async () => {
-                            await ctx.replyWithPhoto(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                if (hasMedia) {
+                    await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
+                        await ctx.deleteMessage().catch(() => {});
+                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard }).catch(async () => {
+                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
                         });
-                } catch (e) {
-                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                    });
+                } else {
+                    await ctx.deleteMessage().catch(() => {});
+                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
+                        .catch(async () => {
+                            await ctx.reply(text + '\n\n⚠️ _Bild konnte nicht geladen werden_', { parse_mode: 'Markdown', reply_markup: keyboard });
+                        });
                 }
             } else {
-                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                if (hasMedia) {
+                    await ctx.deleteMessage().catch(() => {});
+                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                } else {
+                    await uiHelper.updateOrSend(ctx, text, keyboard);
+                }
             }
         } catch (error) { console.error(error.message); }
     });

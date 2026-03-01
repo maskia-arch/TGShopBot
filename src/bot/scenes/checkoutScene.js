@@ -11,15 +11,8 @@ const isPrivnoteLink = (text) => {
     return /^https?:\/\/(www\.)?privnote\.com\/[^\s]+/i.test(text.trim());
 };
 
-// ════════════════════════════════════════════
-// CHECKOUT SCENE v0.3.7
-// State Machine: init → delivery_choice → shipping_address → payment_select → payment_confirm
-// ════════════════════════════════════════════
-
 const checkoutScene = new Scenes.WizardScene(
     'checkoutScene',
-
-    // ── STEP 0: Init & Lieferoption bestimmen ──
     async (ctx) => {
         ctx.wizard.state.shippingLink = null;
         ctx.wizard.state.paymentMethod = null;
@@ -76,7 +69,6 @@ const checkoutScene = new Scenes.WizardScene(
                 ctx.wizard.state.deliveryMethod = 'pickup';
                 await showPaymentSelection(ctx);
             } else {
-                // Digital → direkt zur Zahlung
                 ctx.wizard.state.deliveryMethod = 'none';
                 await showPaymentSelection(ctx);
             }
@@ -84,27 +76,21 @@ const checkoutScene = new Scenes.WizardScene(
             return ctx.wizard.next();
         } catch (error) {
             console.error('Checkout Init Error:', error.message);
-            await ctx.reply('❌ Fehler beim Starten des Checkouts. Bitte versuche es erneut.');
+            await ctx.reply('❌ Fehler beim Starten des Checkouts.');
             return ctx.scene.leave();
         }
     },
-
-    // ── STEP 1: Universal Handler ──
     async (ctx) => {
         const phase = ctx.wizard.state.phase;
-
-        // ── CALLBACK ──
         if (ctx.callbackQuery) {
             const data = ctx.callbackQuery.data;
             ctx.answerCbQuery().catch(() => {});
 
-            // Abbrechen – funktioniert in JEDER Phase
             if (data === 'co_cancel') {
                 await ctx.reply('❌ Bestellung abgebrochen.');
                 return ctx.scene.leave();
             }
 
-            // Lieferwahl
             if (phase === 'delivery_choice') {
                 if (data === 'co_delivery_shipping') {
                     ctx.wizard.state.deliveryMethod = 'shipping';
@@ -123,7 +109,6 @@ const checkoutScene = new Scenes.WizardScene(
                 }
             }
 
-            // Zahlungsauswahl
             if (phase === 'payment_select' && data.startsWith('co_pay_')) {
                 const paymentId = data.replace('co_pay_', '');
                 try {
@@ -149,32 +134,22 @@ const checkoutScene = new Scenes.WizardScene(
                     ctx.wizard.state.phase = 'payment_confirm';
                 } catch (error) {
                     console.error('Payment Method Error:', error.message);
-                    await ctx.reply('❌ Zahlungsart konnte nicht geladen werden.');
                     return ctx.scene.leave();
                 }
                 return;
             }
 
-            // Manuelle Bestellung
-            if (phase === 'payment_confirm' && data === 'co_confirm_manual') {
+            if (phase === 'payment_confirm' && (data === 'co_confirm_manual' || data === 'co_finalize')) {
                 return await finalizeOrder(ctx);
             }
 
-            // Bestellung abschicken
-            if (phase === 'payment_confirm' && data === 'co_finalize') {
-                return await finalizeOrder(ctx);
-            }
-
-            // Zurück zur Zahlungsauswahl
             if (data === 'co_back_payment') {
                 await showPaymentSelection(ctx);
                 return;
             }
-
             return;
         }
 
-        // ── TEXT-EINGABE ──
         if (ctx.message && ctx.message.text) {
             const input = ctx.message.text.trim();
             if (input.startsWith('/')) return;
@@ -185,12 +160,9 @@ const checkoutScene = new Scenes.WizardScene(
                     await showPaymentSelection(ctx);
                     return;
                 }
-
-                // Klartext → löschen + Warnung
                 ctx.telegram.deleteMessage(ctx.chat.id, ctx.message.message_id).catch(() => {});
                 await ctx.reply(texts.getShippingPlaintextWarning(), {
                     parse_mode: 'Markdown',
-                    disable_web_page_preview: true,
                     reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'co_cancel' }]] }
                 });
                 return;
@@ -198,34 +170,25 @@ const checkoutScene = new Scenes.WizardScene(
         }
     }
 );
-
-// ── Zahlungsauswahl anzeigen ──
 async function showPaymentSelection(ctx) {
     try {
         const paymentMethods = await paymentRepo.getActivePaymentMethods();
-
         if (!paymentMethods || paymentMethods.length === 0) {
             const text = 'ℹ️ *Manuelle Zahlungsabwicklung*\n\n' +
                 `💰 *Gesamtsumme: ${formatters.formatPrice(ctx.wizard.state.cartTotal)}*\n\n` +
-                'Keine Zahlungsmethoden hinterlegt.\n\n*Bestellung trotzdem abschicken?*';
+                'Bestellung trotzdem abschicken?';
 
             await ctx.reply(text, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '✅ Bestellen', callback_data: 'co_confirm_manual' }],
-                        [{ text: '❌ Abbrechen', callback_data: 'co_cancel' }]
-                    ]
+                    inline_keyboard: [[{ text: '✅ Bestellen', callback_data: 'co_confirm_manual' }], [{ text: '❌ Abbrechen', callback_data: 'co_cancel' }]]
                 }
             });
             ctx.wizard.state.phase = 'payment_confirm';
             return;
         }
 
-        const keyboard = paymentMethods.map(pm => ([{
-            text: pm.name,
-            callback_data: `co_pay_${pm.id}`
-        }]));
+        const keyboard = paymentMethods.map(pm => ([{ text: pm.name, callback_data: `co_pay_${pm.id}` }]));
         keyboard.push([{ text: '❌ Abbrechen', callback_data: 'co_cancel' }]);
 
         await ctx.reply(texts.getCheckoutSelectPayment(), {
@@ -235,12 +198,10 @@ async function showPaymentSelection(ctx) {
         ctx.wizard.state.phase = 'payment_select';
     } catch (error) {
         console.error('Payment Select Error:', error.message);
-        await ctx.reply('❌ Fehler beim Laden der Zahlungsarten.');
         return ctx.scene.leave();
     }
 }
 
-// ── Order finalisieren ──
 async function finalizeOrder(ctx) {
     try {
         const userId = ctx.from.id;
@@ -248,27 +209,21 @@ async function finalizeOrder(ctx) {
         const cartTotal = ctx.wizard.state.cartTotal;
         const orderDetails = ctx.wizard.state.orderDetails;
 
-        if (!orderDetails || orderDetails.length === 0) {
-            await ctx.reply('🛒 Warenkorb ist leer.');
-            return ctx.scene.leave();
-        }
+        if (!orderDetails || orderDetails.length === 0) return ctx.scene.leave();
 
         const paymentMethod = ctx.wizard.state.paymentMethod;
         const paymentMethodName = paymentMethod ? paymentMethod.name : 'Manuelle Abwicklung';
         const walletAddress = paymentMethod ? paymentMethod.wallet_address : null;
         const deliveryMethod = ctx.wizard.state.deliveryMethod;
 
-        // Order erstellen (generiert orderXXXXXX)
         const order = await orderRepo.createOrder(userId, parseFloat(cartTotal), orderDetails, {
             shippingLink: ctx.wizard.state.shippingLink,
             paymentMethodName: paymentMethodName,
             deliveryMethod: deliveryMethod
         });
 
-        // Warenkorb leeren
         await cartRepo.clearCart(userId);
 
-        // ── KUNDEN-RECEIPT ──
         const receiptText = texts.getCustomerInvoice({
             orderId: order.order_id,
             total: parseFloat(cartTotal).toFixed(2),
@@ -277,7 +232,6 @@ async function finalizeOrder(ctx) {
             deliveryMethod: deliveryMethod
         });
 
-        // Hier fangen wir die gesendete Nachricht ab
         const sentReceipt = await ctx.reply(receiptText, {
             parse_mode: 'Markdown',
             reply_markup: {
@@ -289,12 +243,10 @@ async function finalizeOrder(ctx) {
             }
         });
 
-        // Füge die Message-ID des Receipts zur Datenbank hinzu, damit es beim nächsten Status-Update gelöscht wird
         if (sentReceipt) {
             await orderRepo.addNotificationMsgId(order.order_id, sentReceipt.chat.id, sentReceipt.message_id);
         }
 
-        // ── ADMIN-BENACHRICHTIGUNG ──
         notificationService.notifyAdminsNewOrder({
             userId, username, orderDetails,
             total: parseFloat(cartTotal).toFixed(2),
@@ -302,17 +254,15 @@ async function finalizeOrder(ctx) {
             orderId: order.order_id,
             shippingLink: ctx.wizard.state.shippingLink,
             deliveryMethod
-        }).catch((err) => console.error('Admin Notify Error:', err.message));
+        }).catch(() => {});
 
         return ctx.scene.leave();
     } catch (error) {
         console.error('Finalize Order Error:', error.message);
-        await ctx.reply('❌ Fehler beim Abschließen der Bestellung. Bitte versuche es erneut oder kontaktiere den Support.');
         return ctx.scene.leave();
     }
 }
 
-// ── Scene-Level Cancel Handler (Fallback) ──
 checkoutScene.action('co_cancel', async (ctx) => {
     ctx.answerCbQuery('Abgebrochen').catch(() => {});
     await ctx.reply('❌ Bestellung abgebrochen.');
