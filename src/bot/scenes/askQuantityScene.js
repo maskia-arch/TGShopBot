@@ -16,6 +16,7 @@ const askQuantityScene = new Scenes.WizardScene(
     'askQuantityScene',
     async (ctx) => {
         ctx.wizard.state.productId = ctx.scene.state.productId;
+        ctx.wizard.state.categoryPath = ctx.scene.state.categoryPath || null;
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.lastQuestion = '🔢 *Menge wählen*\n\nBitte gib die gewünschte Menge als Zahl ein:';
 
@@ -35,7 +36,6 @@ const askQuantityScene = new Scenes.WizardScene(
             await cleanup(ctx);
             
             const productId = ctx.wizard.state.productId;
-            const shopActions = require('../actions/shopActions');
             ctx.update.callback_query = { data: `product_${productId}`, from: ctx.from };
             
             return ctx.scene.leave();
@@ -71,9 +71,10 @@ const askQuantityScene = new Scenes.WizardScene(
 
         try {
             const productId = ctx.wizard.state.productId;
+            const categoryPath = ctx.wizard.state.categoryPath;
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             
-            await cartRepo.addToCart(ctx.from.id, productId, quantity, username);
+            await cartRepo.addToCart(ctx.from.id, productId, quantity, username, categoryPath);
             await cleanup(ctx);
             
             await ctx.reply(`✅ *${quantity}x zum Warenkorb hinzugefügt!*`, {
@@ -99,10 +100,7 @@ const askQuantityScene = new Scenes.WizardScene(
 askQuantityScene.action('cancel_scene', async (ctx) => {
     await ctx.answerCbQuery('Abgebrochen');
     await cleanup(ctx);
-    const productId = ctx.wizard.state.productId;
     await ctx.scene.leave();
-    
-    ctx.update.callback_query = { data: `product_${productId}`, from: ctx.from };
 });
 
 module.exports = askQuantityScene;
