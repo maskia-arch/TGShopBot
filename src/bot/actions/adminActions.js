@@ -191,11 +191,13 @@ module.exports = (bot) => {
             console.error(error.message); 
         }
     });
+
+    // ─── DRILL-DOWN MENÜ: KATEGORIEN ───
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const categories = await productRepo.getActiveCategories();
-            const keyboard = categories.map(c => ([{ text: c.name, callback_data: `admin_prod_cat_${c.id}` }]));
+            const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `admin_prod_cat_${c.id}` }]));
             keyboard.push([{ text: '📦 Kategorielose Produkte', callback_data: 'admin_prod_cat_none' }]);
             keyboard.push([{ text: '➕ Neues Produkt', callback_data: 'admin_add_prod_none' }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
@@ -205,11 +207,51 @@ module.exports = (bot) => {
         }
     });
 
+    // ─── DRILL-DOWN MENÜ: UNTERKATEGORIEN & DIREKTE PRODUKTE ───
     bot.action(/^admin_prod_cat_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
-            const products = await productRepo.getProductsByCategory(categoryId, true);
+            const keyboard = [];
+
+            if (categoryId !== null) {
+                const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
+                subcats.forEach(sc => {
+                    keyboard.push([{ text: `📂 ${sc.name}`, callback_data: `admin_prod_subcat_${sc.id}` }]);
+                });
+            }
+
+            const allProducts = await productRepo.getProductsByCategory(categoryId, true);
+            const directProducts = categoryId === null ? allProducts : allProducts.filter(p => !p.subcategory_id);
+
+            directProducts.forEach(p => {
+                let label = p.name;
+                if (!p.is_active) label = `👻 ${label}`;
+                if (p.is_out_of_stock) label = `❌ ${label}`;
+                const opt = p.delivery_option || 'none';
+                if (opt === 'shipping') label = `🚚 ${label}`;
+                else if (opt === 'pickup') label = `🏪 ${label}`;
+                else if (opt === 'both') label = `🚚🏪 ${label}`;
+                keyboard.push([{ text: `${label} (${formatters.formatPrice(p.price)})`, callback_data: `admin_edit_prod_${p.id}` }]);
+            });
+
+            keyboard.push([{ text: '➕ Produkt hinzufügen', callback_data: `admin_add_prod_${ctx.match[1]}` }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]);
+            
+            await uiHelper.updateOrSend(ctx, 'Wähle eine Unterkategorie oder ein Produkt:', { inline_keyboard: keyboard });
+        } catch (error) { 
+            console.error(error.message); 
+        }
+    });
+
+    // ─── DRILL-DOWN MENÜ: PRODUKTE IN UNTERKATEGORIEN ───
+    bot.action(/^admin_prod_subcat_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const subcatId = ctx.match[1];
+            const subcat = await subcategoryRepo.getSubcategoryById(subcatId);
+            const products = await productRepo.getProductsBySubcategory(subcatId, true);
+
             const keyboard = products.map(p => {
                 let label = p.name;
                 if (!p.is_active) label = `👻 ${label}`;
@@ -220,9 +262,12 @@ module.exports = (bot) => {
                 else if (opt === 'both') label = `🚚🏪 ${label}`;
                 return [{ text: `${label} (${formatters.formatPrice(p.price)})`, callback_data: `admin_edit_prod_${p.id}` }];
             });
-            keyboard.push([{ text: '➕ Produkt hinzufügen', callback_data: `admin_add_prod_${ctx.match[1]}` }]);
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]);
-            await uiHelper.updateOrSend(ctx, 'Produkt auswählen:', { inline_keyboard: keyboard });
+
+            const backCb = subcat ? `admin_prod_cat_${subcat.category_id}` : 'admin_manage_products';
+            keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
+
+            const title = `📂 *${subcat ? subcat.name : 'Unterkategorie'}*\n\nWähle ein Produkt:`;
+            await uiHelper.updateOrSend(ctx, title, { inline_keyboard: keyboard });
         } catch (error) { 
             console.error(error.message); 
         }
@@ -238,19 +283,44 @@ module.exports = (bot) => {
         }
     });
 
+    // ─── SPAM-FREIES BEARBEITEN & SORTIEREN VON PRODUKTEN ───
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return;
+            
+            // --- NEU: PFAD ERMITTELN FÜR DIE ADMIN ANSICHT ---
+            let path = 'Kategorielos';
+            try {
+                if (product.category_id) {
+                    const categories = await productRepo.getActiveCategories();
+                    const cat = categories.find(c => String(c.id) === String(product.category_id));
+                    path = cat ? cat.name : 'Unbekannt';
+
+                    if (product.subcategory_id) {
+                        const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
+                        if (subcat) path += ` » ${subcat.name}`;
+                    }
+                }
+            } catch (e) {}
+            // ---------------------------------------------------
+
             const deliveryOpt = product.delivery_option || 'none';
             const deliveryLabel = texts.getDeliveryLabel(deliveryOpt);
-            let text = `*${product.name}*\n\n`;
+            
+            let text = `*${product.name}*\n`;
+            text += `📂 _In: ${path}_\n\n`; // HIER WIRD DER PFAD ANGEZEIGT
             text += `💰 Preis: ${formatters.formatPrice(product.price)}\n`;
             text += `📦 Aktiv: ${product.is_active ? '✅' : '❌'}\n`;
             text += `📋 Verfügbar: ${product.is_out_of_stock ? '❌ Ausverkauft' : '✅'}\n`;
             text += `🚚 Lieferoption: ${deliveryLabel}\n`;
             if (product.description) text += `\n📝 ${product.description}`;
+            
+            const backCb = product.subcategory_id 
+                ? `admin_prod_subcat_${product.subcategory_id}` 
+                : (product.category_id ? `admin_prod_cat_${product.category_id}` : 'admin_prod_cat_none');
+
             const keyboard = { inline_keyboard: [
                 [
                     { text: product.is_active ? '👻 Deaktivieren' : '✅ Aktivieren', callback_data: `admin_toggle_active_${product.id}` },
@@ -261,19 +331,26 @@ module.exports = (bot) => {
                 [{ text: '✏️ Umbenennen', callback_data: `admin_rename_prod_${product.id}` }],
                 [{ text: '🖼 Bild ändern', callback_data: `admin_img_${product.id}` }],
                 [
-                    { text: '🔼', callback_data: `admin_sort_prod_up_${product.id}` },
-                    { text: '🔽', callback_data: `admin_sort_prod_down_${product.id}` }
+                    { text: '🔼 Nach oben', callback_data: `admin_sort_prod_up_${product.id}` },
+                    { text: '🔽 Nach unten', callback_data: `admin_sort_prod_down_${product.id}` }
                 ],
                 [{ text: '🗑 Löschen', callback_data: `admin_del_prod_${product.id}` }],
-                [{ text: '🔙 Zurück', callback_data: product.category_id ? `admin_prod_cat_${product.category_id}` : 'admin_prod_cat_none' }]
+                [{ text: '🔙 Zurück', callback_data: backCb }]
             ]};
+
             if (product.image_url) {
-                const fileId = product.image_url;
                 try {
-                    await ctx.replyWithAnimation(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
-                        .catch(async () => {
-                            await ctx.replyWithPhoto(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                    if (ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation)) {
+                        await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(e => {
+                            if (!e.message.includes('not modified')) throw e;
                         });
+                    } else {
+                        await ctx.deleteMessage().catch(() => {});
+                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
+                            .catch(async () => {
+                                await ctx.replyWithAnimation(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                            });
+                    }
                 } catch (e) {
                     await uiHelper.updateOrSend(ctx, text, keyboard);
                 }
@@ -369,7 +446,15 @@ module.exports = (bot) => {
             const prodId = ctx.match[2];
             const product = await productRepo.getProductById(prodId);
             if (!product) return;
-            const products = await productRepo.getProductsByCategory(product.category_id, true);
+            
+            let products;
+            if (product.subcategory_id) {
+                products = await productRepo.getProductsBySubcategory(product.subcategory_id, true);
+            } else {
+                const allCatProducts = await productRepo.getProductsByCategory(product.category_id, true);
+                products = allCatProducts.filter(p => !p.subcategory_id);
+            }
+
             const index = products.findIndex(p => p.id == prodId);
             if ((direction === 'up' && index > 0) || (direction === 'down' && index < products.length - 1)) {
                 const swapIndex = direction === 'up' ? index - 1 : index + 1;
@@ -394,18 +479,22 @@ module.exports = (bot) => {
         try {
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
             const product = await productRepo.getProductById(ctx.match[1]);
+            
+            const backCb = product && product.subcategory_id 
+                ? `admin_prod_subcat_${product.subcategory_id}` 
+                : (product && product.category_id ? `admin_prod_cat_${product.category_id}` : 'admin_prod_cat_none');
+
             if (isMaster) {
                 await productRepo.deleteProduct(ctx.match[1]);
                 ctx.answerCbQuery('🗑 Gelöscht.').catch(() => {});
-                ctx.update.callback_query.data = product && product.category_id
-                    ? `admin_prod_cat_${product.category_id}` : 'admin_prod_cat_none';
+                ctx.update.callback_query.data = backCb;
                 return bot.handleUpdate(ctx.update);
             } else {
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 await approvalRepo.createApproval(ctx.match[1], 'DELETE', null, adminName);
                 ctx.answerCbQuery('Löschanfrage gesendet.').catch(() => {});
                 await uiHelper.updateOrSend(ctx, `🔔 Löschanfrage für *${product.name || 'Produkt'}* wurde an den Master gesendet.`, {
-                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: backCb }]]
                 });
             }
         } catch (error) { 
