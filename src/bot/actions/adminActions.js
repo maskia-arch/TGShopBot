@@ -173,7 +173,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ─── NEU: UNTERKATEGORIEN SORTIEREN ───
     bot.action(/^admin_sort_subcat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const direction = ctx.match[1];
@@ -197,7 +196,6 @@ module.exports = (bot) => {
                 ctx.answerCbQuery('Nicht möglich.').catch(() => {});
             }
             
-            // Lade die Ansicht neu
             ctx.update.callback_query.data = `admin_edit_subcat_${id}`;
             return bot.handleUpdate(ctx.update);
         } catch (error) { 
@@ -227,8 +225,6 @@ module.exports = (bot) => {
             console.error(error.message); 
         }
     });
-
-    // ─── DRILL-DOWN MENÜ: KATEGORIEN ───
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -243,7 +239,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ─── DRILL-DOWN MENÜ: UNTERKATEGORIEN & DIREKTE PRODUKTE ───
     bot.action(/^admin_prod_cat_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -280,7 +275,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ─── DRILL-DOWN MENÜ: PRODUKTE IN UNTERKATEGORIEN ───
     bot.action(/^admin_prod_subcat_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -319,7 +313,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ─── SPAM-FREIES BEARBEITEN & SORTIEREN VON PRODUKTEN ───
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -372,24 +365,22 @@ module.exports = (bot) => {
                 [{ text: '🔙 Zurück', callback_data: backCb }]
             ]};
 
+            const hasMedia = ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation);
+
             if (product.image_url) {
-                try {
-                    if (ctx.callbackQuery && ctx.callbackQuery.message && (ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation)) {
-                        await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(e => {
-                            if (!e.message.includes('not modified')) throw e;
-                        });
-                    } else {
-                        await ctx.deleteMessage().catch(() => {});
-                        await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
-                            .catch(async () => {
-                                await ctx.replyWithAnimation(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
-                            });
-                    }
-                } catch (e) {
-                    await uiHelper.updateOrSend(ctx, text, keyboard);
+                if (hasMedia) {
+                    await ctx.editMessageCaption(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {});
+                } else {
+                    await ctx.deleteMessage().catch(() => {});
+                    await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
                 }
             } else {
-                await uiHelper.updateOrSend(ctx, text, keyboard);
+                if (hasMedia) {
+                    await ctx.deleteMessage().catch(() => {});
+                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                } else {
+                    await uiHelper.updateOrSend(ctx, text, keyboard);
+                }
             }
         } catch (error) { 
             console.error(error.message); 

@@ -97,7 +97,6 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    // GEFIXT: Regex für oview akzeptiert nun alle Zeichenfolgen
     bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -116,7 +115,7 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    bot.action(/^ostatus_([\w-]+)_(.+)$/, isAdmin, async (ctx) => {
+    bot.action(/^ostatus_(.+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             let newStatus = ctx.match[2];
@@ -169,7 +168,10 @@ module.exports = (bot) => {
                 reply_markup: { inline_keyboard: [[{ text: '🗑 Löschen', callback_data: `odel_confirm_${orderId}` }], [{ text: '❌ Nein', callback_data: `oview_${orderId}` }]] }
             });
         }
-        const approval = await approvalRepo.createApprovalRequest('ORDER_DELETE', ctx.from.id, orderId, orderId);
+        
+        const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+        const approval = await approvalRepo.createApproval(orderId, 'ORDER_DELETE', null, adminName);
+        
         ctx.reply('📨 Löschanfrage an Master gesendet.');
         notificationService.sendTo(config.MASTER_ADMIN_ID, `🗑 *Löschanfrage*\nBestellung: \`#${orderId}\``, {
             reply_markup: { inline_keyboard: [[{ text: '✅ OK', callback_data: `odel_approve_${approval.id}` }, { text: '❌ NO', callback_data: `odel_reject_${approval.id}` }]] }

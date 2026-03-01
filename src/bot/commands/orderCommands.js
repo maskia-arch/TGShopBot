@@ -10,12 +10,9 @@ const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
 
-    // GEFIXT: Erkennt nun das Format /order + beliebige Zeichenfolge (z.B. /orderc4ae82)
-    bot.hears(/^\/order.+/i, isAdmin, async (ctx) => {
+    bot.hears(/^\/order/i, isAdmin, async (ctx) => {
         try {
-            const input = ctx.message.text.trim().toLowerCase();
-            const orderId = input.replace('/', ''); // Entfernt nur den Slash
-            
+            const orderId = ctx.message.text.split(' ')[0].replace('/', '').trim().toLowerCase();
             const order = await orderRepo.getOrderByOrderId(orderId);
             
             if (!order) return ctx.reply(`⚠️ Bestellung \`${orderId}\` nicht gefunden.`, { parse_mode: 'Markdown' });
@@ -81,8 +78,8 @@ module.exports = (bot) => {
                 ctx.reply(`🗑 Bestellung \`${order.order_id}\` gelöscht.`, { parse_mode: 'Markdown' });
             } else {
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
-                const approval = await approvalRepo.createApprovalRequest(
-                    'ORDER_DELETE', ctx.from.id, order.order_id, order.order_id
+                const approval = await approvalRepo.createApproval(
+                    order.order_id, 'DELETE', null, adminName
                 );
 
                 ctx.reply(`📨 Löschanfrage für \`${order.order_id}\` an den Master gesendet.`, { parse_mode: 'Markdown' });
