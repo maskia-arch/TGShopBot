@@ -1,6 +1,5 @@
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
-const categoryRepo = require('../../database/repositories/categoryRepo'); // Neu importiert falls vorhanden, sonst über productRepo
 const orderRepo = require('../../database/repositories/orderRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
@@ -163,8 +162,10 @@ module.exports = (bot) => {
 
             let path = '';
             try {
-                const cat = await productRepo.getCategoryById(product.category_id);
+                const categories = await productRepo.getActiveCategories();
+                const cat = categories.find(c => String(c.id) === String(product.category_id));
                 path = cat ? cat.name : '';
+                
                 if (product.subcategory_id) {
                     const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
                     if (subcat) path += ` » ${subcat.name}`;
@@ -209,14 +210,20 @@ module.exports = (bot) => {
         try {
             const product = await productRepo.getProductById(ctx.match[1]);
             let path = '';
+            
             if (product) {
-                const cat = await productRepo.getCategoryById(product.category_id);
-                path = cat ? cat.name : '';
-                if (product.subcategory_id) {
-                    const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
-                    if (subcat) path += ` » ${subcat.name}`;
-                }
+                try {
+                    const categories = await productRepo.getActiveCategories();
+                    const cat = categories.find(c => String(c.id) === String(product.category_id));
+                    path = cat ? cat.name : '';
+                    
+                    if (product.subcategory_id) {
+                        const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
+                        if (subcat) path += ` » ${subcat.name}`;
+                    }
+                } catch (e) {}
             }
+            
             await ctx.scene.enter('askQuantityScene', { productId: ctx.match[1], categoryPath: path }); 
         } 
         catch (error) { console.error(error.message); }
