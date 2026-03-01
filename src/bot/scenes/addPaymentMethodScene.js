@@ -12,6 +12,15 @@ const cleanup = async (ctx) => {
     }
 };
 
+const backToPaymentsMenu = async (ctx) => {
+    await ctx.reply('Menü:', {
+        reply_markup: {
+            inline_keyboard: [[{ text: '🔙 Zurück zu Zahlungsarten', callback_data: 'master_manage_payments' }]]
+        }
+    });
+    return ctx.scene.leave();
+};
+
 const addPaymentMethodScene = new Scenes.WizardScene(
     'addPaymentMethodScene',
     async (ctx) => {
@@ -31,9 +40,7 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await ctx.scene.leave();
-            ctx.update.callback_query.data = 'master_manage_payments';
-            return;
+            return backToPaymentsMenu(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
@@ -70,9 +77,7 @@ const addPaymentMethodScene = new Scenes.WizardScene(
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
             await ctx.answerCbQuery('Abgebrochen');
             await cleanup(ctx);
-            await ctx.scene.leave();
-            ctx.update.callback_query.data = 'master_manage_payments';
-            return;
+            return backToPaymentsMenu(ctx);
         }
 
         let address = null;
@@ -109,8 +114,7 @@ const addPaymentMethodScene = new Scenes.WizardScene(
             
             await ctx.reply(texts.getPaymentSaved(name, address), { parse_mode: 'Markdown' });
 
-            ctx.update.callback_query = { data: 'master_manage_payments', from: ctx.from };
-            return ctx.scene.leave();
+            return backToPaymentsMenu(ctx);
         } catch (error) {
             console.error('AddPayment Error:', error.message);
             await cleanup(ctx);
@@ -123,8 +127,7 @@ const addPaymentMethodScene = new Scenes.WizardScene(
 addPaymentMethodScene.action('cancel_scene', async (ctx) => {
     await ctx.answerCbQuery('Abgebrochen');
     await cleanup(ctx);
-    await ctx.scene.leave();
-    ctx.update.callback_query = { data: 'master_manage_payments', from: ctx.from };
+    return backToPaymentsMenu(ctx);
 });
 
 addPaymentMethodScene.action('skip_address', async (ctx) => {

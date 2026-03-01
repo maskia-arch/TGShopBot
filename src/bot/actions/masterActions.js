@@ -38,6 +38,17 @@ module.exports = (bot) => {
         }
     });
 
+    // --- HIER IST DER FIX FÜR DEN BUTTON ---
+    bot.action('master_add_payment', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('addPaymentMethodScene');
+        } catch (error) { 
+            console.error(error.message); 
+        }
+    });
+    // ---------------------------------------
+
     bot.action(/^master_view_pay_(.+)$/, isMasterAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
