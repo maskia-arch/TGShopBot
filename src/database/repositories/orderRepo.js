@@ -34,7 +34,9 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
 };
 
 const getOrderByOrderId = async (orderId) => {
-    let searchId = orderId.toString().trim().toLowerCase().replace(/[#/]/g, '');
+    if (!orderId) return null;
+    // GEFIXT: Entfernt #, / und Leerzeichen für eine saubere Suche
+    const searchId = orderId.toString().trim().toLowerCase().replace(/[#/]/g, '');
 
     const { data, error } = await supabase
         .from('orders')

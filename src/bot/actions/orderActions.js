@@ -97,7 +97,8 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    bot.action(/^oview_([\w-]+)$/, isAdmin, async (ctx) => {
+    // GEFIXT: Regex für oview akzeptiert nun alle Zeichenfolgen
+    bot.action(/^oview_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -142,7 +143,7 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    bot.action(/^odeliv_([\w-]+)$/, isAdmin, async (ctx) => {
+    bot.action(/^odeliv_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -161,7 +162,7 @@ module.exports = (bot) => {
         await ctx.reply('❌ Digitale Auslieferung abgebrochen.');
     });
 
-    bot.action(/^odel_([\w-]+)$/, isAdmin, async (ctx) => {
+    bot.action(/^odel_(.+)$/, isAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         if (ctx.from.id === Number(config.MASTER_ADMIN_ID)) {
             return ctx.reply(`⚠️ \`#${orderId}\` endgültig löschen?`, {

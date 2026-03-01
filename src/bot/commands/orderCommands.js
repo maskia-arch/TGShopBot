@@ -10,9 +10,12 @@ const notificationService = require('../../services/notificationService');
 
 module.exports = (bot) => {
 
-    bot.hears(/^\/order[a-z0-9]{6}$/i, isAdmin, async (ctx) => {
+    // GEFIXT: Erkennt nun das Format /order + beliebige Zeichenfolge (z.B. /orderc4ae82)
+    bot.hears(/^\/order.+/i, isAdmin, async (ctx) => {
         try {
-            const orderId = ctx.message.text.replace('/', '').trim().toLowerCase();
+            const input = ctx.message.text.trim().toLowerCase();
+            const orderId = input.replace('/', ''); // Entfernt nur den Slash
+            
             const order = await orderRepo.getOrderByOrderId(orderId);
             
             if (!order) return ctx.reply(`⚠️ Bestellung \`${orderId}\` nicht gefunden.`, { parse_mode: 'Markdown' });
@@ -33,7 +36,7 @@ module.exports = (bot) => {
     bot.command('orderid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/orderid order26lc54`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/orderid orderc4ae82`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply(`⚠️ Bestellung "${args}" nicht gefunden.`);
             
@@ -49,7 +52,7 @@ module.exports = (bot) => {
     bot.command('id', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/id order26lc54`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/id orderc4ae82`', { parse_mode: 'Markdown' });
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply('⚠️ Nicht gefunden.');
             
@@ -65,7 +68,7 @@ module.exports = (bot) => {
     bot.command('deleteid', isAdmin, async (ctx) => {
         try {
             const args = ctx.message.text.split(' ').slice(1).join(' ').trim();
-            if (!args) return ctx.reply('⚠️ Beispiel: `/deleteid order26lc54`', { parse_mode: 'Markdown' });
+            if (!args) return ctx.reply('⚠️ Beispiel: `/deleteid orderc4ae82`', { parse_mode: 'Markdown' });
 
             const order = await orderRepo.getOrderByOrderId(args);
             if (!order) return ctx.reply(`⚠️ Bestellung "${args}" nicht gefunden.`);
