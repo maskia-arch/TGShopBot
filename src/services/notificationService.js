@@ -86,12 +86,22 @@ const notifyAdminsNewOrder = async (data) => {
 const notifyAdminsTxId = async (data) => {
     try {
         const order = await orderRepo.getOrderByOrderId(data.orderId);
-        const text = texts.getAdminTxIdNotify(data);
+        
+        const safeData = {
+            orderId: data.orderId,
+            userId: data.userId || (order ? order.user_id : 'Unbekannt'),
+            username: (data.username && data.username !== 'undefined') ? data.username : 'Kunde',
+            total: (data.total && data.total !== 'undefined' && data.total !== 'NaN €') ? data.total : (order ? (parseFloat(order.total_amount).toFixed(2).replace('.', ',') + ' €') : '0,00 €'),
+            paymentName: (data.paymentName && data.paymentName !== 'undefined') ? data.paymentName : (order ? order.payment_method_name : 'Unbekannt'),
+            txId: data.txId
+        };
+
+        const text = texts.getAdminTxIdNotify(safeData);
 
         const keyboard = {
             inline_keyboard: [
-                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }],
-                [{ text: '✅ Zahlung bestätigen', callback_data: `ostatus_${data.orderId}_in_bearbeitung` }]
+                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${safeData.orderId}` }],
+                [{ text: '✅ Zahlung bestätigen', callback_data: `ostatus_${safeData.orderId}_in_bearbeitung` }]
             ]
         };
 
@@ -107,7 +117,7 @@ const notifyAdminsTxId = async (data) => {
                 return notif;
             });
             
-            const results = await Promise.all(updatePromises);
+            await Promise.all(updatePromises);
             
         } else {
             const admins = await userRepo.getAllAdmins();
@@ -116,7 +126,7 @@ const notifyAdminsTxId = async (data) => {
             for (const admin of admins) {
                 const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
                     if (msg && msg.message_id) {
-                        return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
+                        return orderRepo.addNotificationMsgId(safeData.orderId, admin.telegram_id, msg.message_id);
                     }
                 }).catch(() => {});
                 notifyPromises.push(p);
@@ -125,7 +135,7 @@ const notifyAdminsTxId = async (data) => {
             if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
                  const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
                     if (msg && msg.message_id) {
-                         return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
+                         return orderRepo.addNotificationMsgId(safeData.orderId, config.MASTER_ADMIN_ID, msg.message_id);
                     }
                 }).catch(() => {});
                 notifyPromises.push(p);
