@@ -16,19 +16,18 @@ const editWelcomeMsgScene = new Scenes.WizardScene(
             
             text += 'Bitte sende jetzt den neuen Text für die Begrüßungsnachricht (oder tippe `Löschen`, um sie zu entfernen):';
 
-            await ctx.editMessageText(text, {
+            if (ctx.callbackQuery) {
+                await ctx.deleteMessage().catch(() => {});
+            }
+
+            const msg = await ctx.reply(text, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_edit_welcome' }]]
                 }
-            }).catch(async () => {
-                await ctx.reply(text, {
-                    parse_mode: 'Markdown',
-                    reply_markup: {
-                        inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_edit_welcome' }]]
-                    }
-                });
             });
+            
+            ctx.wizard.state.promptMsgId = msg.message_id;
             return ctx.wizard.next();
         } catch (error) {
             console.error(error.message);
@@ -49,6 +48,11 @@ const editWelcomeMsgScene = new Scenes.WizardScene(
 
         if (ctx.message && ctx.message.text) {
             const input = ctx.message.text.trim();
+            
+            await ctx.deleteMessage().catch(() => {});
+            if (ctx.wizard.state.promptMsgId) {
+                await ctx.telegram.deleteMessage(ctx.chat.id, ctx.wizard.state.promptMsgId).catch(() => {});
+            }
             
             if (input.toLowerCase() === 'löschen') {
                 await settingsRepo.setSetting('welcome_message', '');

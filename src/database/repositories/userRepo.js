@@ -2,13 +2,23 @@ const supabase = require('../supabaseClient');
 const config = require('../../config');
 
 const upsertUser = async (userId, username) => {
-    const { error } = await supabase
-        .from('users')
-        .upsert(
-            { telegram_id: userId, username: username, role: 'customer' },
-            { onConflict: 'telegram_id', ignoreDuplicates: true }
-        );
-    if (error) throw error;
+    const { data } = await supabase.from('users').select('telegram_id').eq('telegram_id', userId).maybeSingle();
+    if (!data) {
+        const { error } = await supabase.from('users').insert([{ telegram_id: userId, username, role: 'customer' }]);
+        if (error) throw error;
+    } else {
+        const { error } = await supabase.from('users').update({ username }).eq('telegram_id', userId);
+        if (error) throw error;
+    }
+};
+
+const hasReceivedWelcome = async (userId) => {
+    const { data } = await supabase.from('users').select('has_received_welcome').eq('telegram_id', userId).maybeSingle();
+    return data ? data.has_received_welcome === true : false;
+};
+
+const markWelcomeReceived = async (userId) => {
+    await supabase.from('users').update({ has_received_welcome: true }).eq('telegram_id', userId);
 };
 
 const getUserRole = async (userId) => {
@@ -19,8 +29,6 @@ const getUserRole = async (userId) => {
 };
 
 const isMasterAdmin = async (userId) => Number(userId) === Number(config.MASTER_ADMIN_ID);
-
-// ── Ban System ──
 
 const isUserBanned = async (userId) => {
     const { data } = await supabase.from('users').select('is_banned').eq('telegram_id', userId).maybeSingle();
@@ -82,8 +90,6 @@ const deleteUserCompletely = async (telegramId) => {
     return true;
 };
 
-// ── Cooldowns ──
-
 const canPing = async (userId) => {
     const { data } = await supabase.from('users').select('last_ping_at').eq('telegram_id', userId).maybeSingle();
     if (!data || !data.last_ping_at) return true;
@@ -104,13 +110,12 @@ const setContactTimestamp = async (userId) => {
     await supabase.from('users').update({ last_contact_at: new Date().toISOString() }).eq('telegram_id', userId);
 };
 
-// ── Standard CRUD ──
-
 const updateUserRole = async (targetId, role) => {
     const { data, error } = await supabase.from('users').update({ role }).eq('telegram_id', targetId).select('telegram_id');
     if (error) throw error;
     return data && data.length > 0;
 };
+
 const addAdmin = async (targetId) => updateUserRole(targetId, 'admin');
 const removeAdmin = async (targetId) => updateUserRole(targetId, 'customer');
 
@@ -135,7 +140,7 @@ const getAllCustomers = async () => {
 };
 
 module.exports = {
-    upsertUser, getUserRole, isMasterAdmin,
+    upsertUser, hasReceivedWelcome, markWelcomeReceived, getUserRole, isMasterAdmin,
     isUserBanned, banUser, unbanUser,
     createPendingBan, getPendingBan, revertBan, getExpiredPendingBans, confirmBan,
     deleteUserCompletely,

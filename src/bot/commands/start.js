@@ -25,25 +25,23 @@ module.exports = (bot) => {
                 } catch (e) {}
             }
 
-            let isNewUser = false;
-            try {
-                const existingRole = await userRepo.getUserRole(userId);
-                if (!existingRole) isNewUser = true;
-            } catch (error) {
-                isNewUser = true;
-            }
-
             await userRepo.upsertUser(userId, username);
             const role = await userRepo.getUserRole(userId);
 
-            if (isNewUser) {
+            if (!isMaster) {
                 try {
-                    const welcomeMsg = await settingsRepo.getSetting('welcome_message');
-                    if (welcomeMsg) {
-                        const pinnedMsg = await ctx.reply(welcomeMsg, { parse_mode: 'Markdown' });
-                        await ctx.pinChatMessage(pinnedMsg.message_id, { disable_notification: true }).catch(() => {});
+                    const hasReceived = await userRepo.hasReceivedWelcome(userId);
+                    if (!hasReceived) {
+                        const welcomeMsg = await settingsRepo.getSetting('welcome_message');
+                        if (welcomeMsg && welcomeMsg.trim() !== '') {
+                            const pinnedMsg = await ctx.reply(welcomeMsg, { parse_mode: 'Markdown' });
+                            await ctx.pinChatMessage(pinnedMsg.message_id, { disable_notification: true }).catch(() => {});
+                            await userRepo.markWelcomeReceived(userId);
+                        }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Welcome Msg Error:', e.message);
+                }
             }
 
             const text = texts.getWelcomeText(isMaster, role);
@@ -63,11 +61,11 @@ module.exports = (bot) => {
                 parse_mode: 'Markdown'
             });
 
-            ctx.deleteMessage().catch(() => {});
-
             if (ctx.session.lastMenuMessageId) {
-                ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.lastMenuMessageId).catch(() => {});
+                await ctx.telegram.deleteMessage(ctx.chat.id, ctx.session.lastMenuMessageId).catch(() => {});
             }
+
+            await ctx.deleteMessage().catch(() => {});
 
             ctx.session.lastMenuMessageId = sentMessage.message_id;
 
