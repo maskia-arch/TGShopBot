@@ -1,16 +1,16 @@
 const supabase = require('../supabaseClient');
 const crypto = require('crypto');
 
-// Hilfsfunktion zur Generierung der neuen Order-ID (z.B. order4f8a2c)
 const generateCustomOrderId = () => {
-    // Generiert 3 zufällige Bytes und wandelt sie in einen 6-stelligen Hex-String (0-9, a-f) um
     return 'order' + crypto.randomBytes(3).toString('hex');
 };
 
+const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
+    shipping_link, payment_method_name,
+    delivery_method, admin_notes, tx_id, created_at, notification_msg_ids`;
+
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod } = options;
-    
-    // Generiere die neue, kryptografisch sichere Order-ID
     const customId = generateCustomOrderId();
 
     const { data, error } = await supabase
@@ -27,18 +27,13 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             admin_notes: [],
             notification_msg_ids: []
         }])
-        .select('id, order_id, status');
+        .select(SELECT_FULL);
 
     if (error) throw error;
     return data[0];
 };
 
-const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
-    shipping_link, payment_method_name,
-    delivery_method, admin_notes, tx_id, created_at, notification_msg_ids`;
-
 const getOrderByOrderId = async (orderId) => {
-    // Flexiblere Suche: Entferne ein eventuelles '#' oder '/' am Anfang
     let searchId = orderId.toString().trim().toLowerCase().replace(/[#/]/g, '');
 
     const { data, error } = await supabase
@@ -66,7 +61,7 @@ const updateOrderStatus = async (orderId, newStatus) => {
         .from('orders')
         .update({ status: newStatus })
         .eq('order_id', orderId)
-        .select('id, order_id, status, user_id');
+        .select(SELECT_FULL);
     if (error) throw error;
     return data && data[0] ? data[0] : null;
 };
@@ -76,7 +71,7 @@ const updateOrderTxId = async (orderId, txId) => {
         .from('orders')
         .update({ tx_id: txId, status: 'bezahlt_pending' })
         .eq('order_id', orderId)
-        .select('id, order_id, status, user_id, tx_id, total_amount, payment_method_name');
+        .select(SELECT_FULL);
     if (error) throw error;
     return data && data[0] ? data[0] : null;
 };
@@ -90,7 +85,7 @@ const addAdminNote = async (orderId, authorName, noteText) => {
         .from('orders')
         .update({ admin_notes: notes })
         .eq('order_id', orderId)
-        .select('order_id, admin_notes');
+        .select(SELECT_FULL);
     if (error) throw error;
     return data[0];
 };
@@ -110,7 +105,7 @@ const deleteAllOrders = async () => {
 const getOrdersByUser = async (userId) => {
     const { data, error } = await supabase
         .from('orders')
-        .select('id, order_id, total_amount, status, details, payment_method_name, delivery_method, tx_id, created_at')
+        .select(SELECT_FULL)
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -121,7 +116,7 @@ const getOrdersByUser = async (userId) => {
 const getActiveOrdersByUser = async (userId) => {
     const { data, error } = await supabase
         .from('orders')
-        .select('id, order_id, total_amount, status, details, payment_method_name, delivery_method, tx_id, created_at')
+        .select(SELECT_FULL)
         .eq('user_id', userId)
         .in('status', ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand'])
         .order('created_at', { ascending: false });
@@ -160,15 +155,12 @@ const addNotificationMsgId = async (orderId, chatId, messageId) => {
     try {
         const order = await getOrderByOrderId(orderId);
         if (!order) return null;
-        
         const currentIds = order.notification_msg_ids || [];
         currentIds.push({ chat_id: chatId, message_id: messageId });
-        
         const { error } = await supabase
             .from('orders')
             .update({ notification_msg_ids: currentIds })
             .eq('order_id', order.order_id);
-            
         if (error) throw error;
         return true;
     } catch (error) {
@@ -181,12 +173,10 @@ const clearNotificationMsgIds = async (orderId) => {
     try {
         const order = await getOrderByOrderId(orderId);
         if (!order) return false;
-        
         const { error } = await supabase
             .from('orders')
             .update({ notification_msg_ids: [] })
             .eq('order_id', order.order_id);
-            
         if (error) throw error;
         return true;
     } catch (error) {

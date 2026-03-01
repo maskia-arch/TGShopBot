@@ -71,17 +71,13 @@ module.exports = (bot) => {
             const categories = await productRepo.getActiveCategories();
             const category = categories.find(c => c.id == categoryId);
             if (!category) return;
-
             const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
-
             const keyboard = { inline_keyboard: [] };
-
             if (subcats.length > 0) {
                 subcats.forEach(sc => {
                     keyboard.inline_keyboard.push([{ text: `📂 ${sc.name}`, callback_data: `admin_edit_subcat_${sc.id}` }]);
                 });
             }
-
             keyboard.inline_keyboard.push(
                 [{ text: '✏️ Namen ändern', callback_data: `admin_rename_cat_${categoryId}` }],
                 [{ text: '📂 Unterkategorie hinzufügen', callback_data: `admin_add_subcat_${categoryId}` }],
@@ -92,10 +88,8 @@ module.exports = (bot) => {
                 [{ text: '🗑 Löschen', callback_data: `admin_del_cat_${categoryId}` }],
                 [{ text: '🔙 Zurück', callback_data: 'admin_manage_categories' }]
             );
-
             let text = `Kategorie: *${category.name}*`;
             if (subcats.length > 0) text += `\n📂 ${subcats.length} Unterkategorie(n)`;
-
             await uiHelper.updateOrSend(ctx, text, keyboard);
         } catch (error) { 
             console.error(error.message); 
@@ -108,7 +102,6 @@ module.exports = (bot) => {
             const id = ctx.match[2];
             const categories = await productRepo.getActiveCategories();
             const index = categories.findIndex(c => c.id == id);
-
             if ((direction === 'up' && index > 0) || (direction === 'down' && index < categories.length - 1)) {
                 const swapIndex = direction === 'up' ? index - 1 : index + 1;
                 await Promise.all(categories.map((cat, i) => {
@@ -121,7 +114,6 @@ module.exports = (bot) => {
             } else {
                 ctx.answerCbQuery('Nicht möglich.').catch(() => {});
             }
-
             ctx.update.callback_query.data = `admin_edit_cat_${id}`;
             return bot.handleUpdate(ctx.update);
         } catch (error) { 
@@ -166,13 +158,11 @@ module.exports = (bot) => {
         try {
             const subcat = await subcategoryRepo.getSubcategoryById(ctx.match[1]);
             if (!subcat) return;
-
             const keyboard = { inline_keyboard: [
                 [{ text: '✏️ Umbenennen', callback_data: `admin_rename_subcat_${subcat.id}` }],
                 [{ text: '🗑 Löschen', callback_data: `admin_del_subcat_${subcat.id}` }],
                 [{ text: '🔙 Zurück', callback_data: `admin_edit_cat_${subcat.category_id}` }]
             ]};
-
             await uiHelper.updateOrSend(ctx, `📂 Unterkategorie: *${subcat.name}*`, keyboard);
         } catch (error) { 
             console.error(error.message); 
@@ -201,7 +191,6 @@ module.exports = (bot) => {
             console.error(error.message); 
         }
     });
-
     bot.action('admin_manage_products', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -210,7 +199,6 @@ module.exports = (bot) => {
             keyboard.push([{ text: '📦 Kategorielose Produkte', callback_data: 'admin_prod_cat_none' }]);
             keyboard.push([{ text: '➕ Neues Produkt', callback_data: 'admin_add_prod_none' }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
-
             await uiHelper.updateOrSend(ctx, '📦 *Produkte verwalten*\n\nWähle eine Kategorie:', { inline_keyboard: keyboard });
         } catch (error) { 
             console.error(error.message); 
@@ -222,7 +210,6 @@ module.exports = (bot) => {
         try {
             const categoryId = ctx.match[1] === 'none' ? null : ctx.match[1];
             const products = await productRepo.getProductsByCategory(categoryId, true);
-
             const keyboard = products.map(p => {
                 let label = p.name;
                 if (!p.is_active) label = `👻 ${label}`;
@@ -233,10 +220,8 @@ module.exports = (bot) => {
                 else if (opt === 'both') label = `🚚🏪 ${label}`;
                 return [{ text: `${label} (${formatters.formatPrice(p.price)})`, callback_data: `admin_edit_prod_${p.id}` }];
             });
-
             keyboard.push([{ text: '➕ Produkt hinzufügen', callback_data: `admin_add_prod_${ctx.match[1]}` }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]);
-
             await uiHelper.updateOrSend(ctx, 'Produkt auswählen:', { inline_keyboard: keyboard });
         } catch (error) { 
             console.error(error.message); 
@@ -258,18 +243,14 @@ module.exports = (bot) => {
         try {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return;
-
             const deliveryOpt = product.delivery_option || 'none';
             const deliveryLabel = texts.getDeliveryLabel(deliveryOpt);
-
             let text = `*${product.name}*\n\n`;
             text += `💰 Preis: ${formatters.formatPrice(product.price)}\n`;
             text += `📦 Aktiv: ${product.is_active ? '✅' : '❌'}\n`;
             text += `📋 Verfügbar: ${product.is_out_of_stock ? '❌ Ausverkauft' : '✅'}\n`;
             text += `🚚 Lieferoption: ${deliveryLabel}\n`;
-
             if (product.description) text += `\n📝 ${product.description}`;
-
             const keyboard = { inline_keyboard: [
                 [
                     { text: product.is_active ? '👻 Deaktivieren' : '✅ Aktivieren', callback_data: `admin_toggle_active_${product.id}` },
@@ -286,7 +267,6 @@ module.exports = (bot) => {
                 [{ text: '🗑 Löschen', callback_data: `admin_del_prod_${product.id}` }],
                 [{ text: '🔙 Zurück', callback_data: product.category_id ? `admin_prod_cat_${product.category_id}` : 'admin_prod_cat_none' }]
             ]};
-
             if (product.image_url) {
                 const fileId = product.image_url;
                 try {
@@ -309,14 +289,11 @@ module.exports = (bot) => {
         try {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return ctx.answerCbQuery('Produkt nicht gefunden.', { show_alert: true });
-
             const cycle = ['none', 'shipping', 'pickup', 'both'];
             const currentIndex = cycle.indexOf(product.delivery_option || 'none');
             const nextOption = cycle[(currentIndex + 1) % cycle.length];
-
             await productRepo.setDeliveryOption(product.id, nextOption);
             ctx.answerCbQuery(`Lieferoption: ${texts.getDeliveryLabel(nextOption)}`).catch(() => {});
-
             ctx.update.callback_query.data = `admin_edit_prod_${product.id}`;
             return bot.handleUpdate(ctx.update);
         } catch (error) {
@@ -392,10 +369,8 @@ module.exports = (bot) => {
             const prodId = ctx.match[2];
             const product = await productRepo.getProductById(prodId);
             if (!product) return;
-
             const products = await productRepo.getProductsByCategory(product.category_id, true);
             const index = products.findIndex(p => p.id == prodId);
-
             if ((direction === 'up' && index > 0) || (direction === 'down' && index < products.length - 1)) {
                 const swapIndex = direction === 'up' ? index - 1 : index + 1;
                 await Promise.all(products.map((p, i) => {
@@ -408,7 +383,6 @@ module.exports = (bot) => {
             } else {
                 ctx.answerCbQuery('Nicht möglich.').catch(() => {});
             }
-
             ctx.update.callback_query.data = `admin_edit_prod_${prodId}`;
             return bot.handleUpdate(ctx.update);
         } catch (error) { 
@@ -420,7 +394,6 @@ module.exports = (bot) => {
         try {
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
             const product = await productRepo.getProductById(ctx.match[1]);
-
             if (isMaster) {
                 await productRepo.deleteProduct(ctx.match[1]);
                 ctx.answerCbQuery('🗑 Gelöscht.').catch(() => {});
@@ -435,7 +408,7 @@ module.exports = (bot) => {
                     inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
                 });
             }
-               } catch (error) { 
+        } catch (error) { 
             console.error(error.message); 
         }
     });

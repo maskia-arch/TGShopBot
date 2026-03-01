@@ -7,7 +7,6 @@ const formatPrice = (amount) => {
 const formatInvoice = (items, total, paymentMethod, orderId = null) => {
     let text = '📦 *Bestellübersicht*\n';
     
-    // Wenn eine Order-ID vorhanden ist, wird sie im neuen Branding-Stil angezeigt
     if (orderId) {
         text += `🆔 *Bestellung:* #${orderId}\n`;
     }
@@ -35,6 +34,17 @@ const formatInvoice = (items, total, paymentMethod, orderId = null) => {
 
 const formatDate = (dateString) => {
     const date = new Date(dateString);
+    
+    if (isNaN(date.getTime())) {
+        return new Date().toLocaleDateString('de-DE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
     return date.toLocaleDateString('de-DE', {
         day: '2-digit',
         month: '2-digit',
