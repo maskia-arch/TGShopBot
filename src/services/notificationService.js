@@ -14,7 +14,7 @@ const sendTo = async (chatId, text, options = {}) => {
     try {
         return await botInstance.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...options });
     } catch (e) {
-        console.error(`Send to ${chatId} failed:`, e.message);
+        // Ignoriere Blockierungen leise für den Log, liefere null zurück
         return null;
     }
 };
@@ -203,10 +203,49 @@ const notifyAdminsNewProduct = async (data) => {
     }
 };
 
+const sendBroadcast = async (text, adminId) => {
+    try {
+        const customers = await userRepo.getAllCustomers();
+        
+        if (!customers || customers.length === 0) {
+            await sendTo(adminId, '⚠️ Es wurden keine registrierten Kunden gefunden.');
+            return;
+        }
+
+        let successCount = 0;
+        let failCount = 0;
+        let blockCount = 0;
+        const promises = customers.map(async (customer) => {
+            const result = await sendTo(customer.telegram_id, text);
+            if (result) {
+                successCount++;
+            } else {
+                failCount++;
+                blockCount++;
+            }
+        });
+
+        await Promise.all(promises);
+
+        const reportText = texts.getBroadcastReport({
+            successCount,
+            failCount,
+            blockCount
+        });
+
+        await sendTo(adminId, reportText);
+        
+    } catch (error) {
+        console.error('Broadcast Error:', error.message);
+        await sendTo(adminId, '❌ Ein Fehler ist beim Ausführen des Broadcasts aufgetreten.');
+    }
+};
+
 module.exports = {
     init, sendTo,
     sendOrderReceipt, notifyCustomerStatusUpdate,
     notifyAdminsNewOrder, notifyAdminsTxId,
     notifyAdminsPing, notifyAdminsContact,
-    notifyMasterBan, notifyAdminsNewProduct
+    notifyMasterBan, notifyAdminsNewProduct,
+    sendBroadcast
 };

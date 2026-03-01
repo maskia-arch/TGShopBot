@@ -87,9 +87,10 @@ module.exports = (bot) => {
             const orders = await orderRepo.getActiveOrdersByUser(userId);
 
             if (!orders || orders.length === 0) {
-                return ctx.reply(texts.getMyOrdersEmpty(), {
-                    parse_mode: 'Markdown',
-                    reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] }
+                const emptyText = texts.getMyOrdersEmpty();
+                const kb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] };
+                return await ctx.editMessageText(emptyText, { parse_mode: 'Markdown', reply_markup: kb }).catch(async () => {
+                    await ctx.reply(emptyText, { parse_mode: 'Markdown', reply_markup: kb });
                 });
             }
 
@@ -117,7 +118,9 @@ module.exports = (bot) => {
             });
 
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'back_to_main' }]);
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }).catch(async () => {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+            });
         } catch (error) {
             console.error('My Orders Error:', error.message);
         }
@@ -176,31 +179,33 @@ module.exports = (bot) => {
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
         }
     });
-
     bot.action('admin_open_orders', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orders = await orderRepo.getOpenOrders(20);
+            let text = '';
+            const keyboard = [];
+
             if (!orders || orders.length === 0) {
-                return ctx.reply('📋 Keine offenen Bestellungen.', {
-                    parse_mode: 'Markdown',
-                    reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_panel' }]] }
+                text = '📋 Keine offenen Bestellungen.';
+            } else {
+                text = '📋 *Offene Bestellungen*\n\n';
+                orders.forEach((order, i) => {
+                    const date = new Date(order.created_at).toLocaleDateString('de-DE');
+                    const txBadge = order.tx_id ? ' 💸' : '';
+                    text += `${i + 1}. \`#${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)}${txBadge} | ${date}\n`;
+                    keyboard.push([{
+                        text: `📋 ${order.order_id}${order.status === 'bezahlt_pending' ? ' 💸' : ''}`,
+                        callback_data: `oview_${order.order_id}`
+                    }]);
                 });
             }
-
-            let text = '📋 *Offene Bestellungen*\n\n';
-            const keyboard = [];
-            orders.forEach((order, i) => {
-                const date = new Date(order.created_at).toLocaleDateString('de-DE');
-                const txBadge = order.tx_id ? ' 💸' : '';
-                text += `${i + 1}. \`#${order.order_id}\` | ${formatters.formatPrice(order.total_amount)} | ${texts.getStatusLabel(order.status)}${txBadge} | ${date}\n`;
-                keyboard.push([{
-                    text: `📋 ${order.order_id}${order.status === 'bezahlt_pending' ? ' 💸' : ''}`,
-                    callback_data: `oview_${order.order_id}`
-                }]);
-            });
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+
+            // EditMessage statt Reply für saubere Navigation
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }).catch(async () => {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+            });
         } catch (error) {
             console.error('Open Orders Error:', error.message);
             await ctx.reply('❌ Fehler beim Laden.');
@@ -217,7 +222,6 @@ module.exports = (bot) => {
             await clearOldNotifications(ctx, order);
             const payload = await buildOrderViewPayload(order);
 
-            // Edit falls möglich, ansonsten Reply
             await ctx.editMessageText(payload.text, { 
                 parse_mode: 'Markdown', 
                 reply_markup: payload.reply_markup, 
@@ -233,6 +237,7 @@ module.exports = (bot) => {
             console.error('Order View Error:', error.message);
         }
     });
+
     bot.action(/^ostatus_([\w-]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -270,7 +275,6 @@ module.exports = (bot) => {
                 await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
             }
 
-            // Kurze Toast-Benachrichtigung und Editieren der aktuellen Nachricht
             ctx.answerCbQuery(`✅ Status aktualisiert auf: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
             
             const payload = await buildOrderViewPayload(updated);
@@ -312,7 +316,8 @@ module.exports = (bot) => {
             await ctx.editMessageText(payload.text, { 
                 parse_mode: 'Markdown', 
                 reply_markup: payload.reply_markup, 
-                disable_web_page_preview: true}).catch(() => {});
+                disable_web_page_preview: true 
+            }).catch(() => {});
         } catch (error) {
             console.error('Force Status Error:', error.message);
             ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
@@ -356,7 +361,6 @@ module.exports = (bot) => {
         if (ctx.session) ctx.session.awaitingNote = null;
         await ctx.reply('❌ Abgebrochen.');
     });
-
     bot.action(/^odel_confirm_([\w-]+)$/, isMasterAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         try {
@@ -503,21 +507,24 @@ module.exports = (bot) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const customers = await userRepo.getAllCustomers();
+            let text = '';
+            const keyboard = [];
+
             if (!customers || customers.length === 0) {
-                return ctx.reply('📊 Keine Kunden registriert.', {
-                    parse_mode: 'Markdown',
-                    reply_markup: { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] }
+                text = '📊 Keine Kunden registriert.';
+            } else {
+                text = `📊 *Kundenübersicht* (${customers.length})\n\n`;
+                customers.slice(0, 20).forEach((c, i) => {
+                    const name = c.username ? `@${c.username}` : `ID: ${c.telegram_id}`;
+                    text += `${i + 1}. ${name}${c.is_banned ? ' 🚫' : ''}\n`;
+                    keyboard.push([{ text: `👤 ${c.username || c.telegram_id}`, callback_data: `cust_detail_${c.telegram_id}` }]);
                 });
             }
-            let text = `📊 *Kundenübersicht* (${customers.length})\n\n`;
-            const keyboard = [];
-            customers.slice(0, 20).forEach((c, i) => {
-                const name = c.username ? `@${c.username}` : `ID: ${c.telegram_id}`;
-                text += `${i + 1}. ${name}${c.is_banned ? ' 🚫' : ''}\n`;
-                keyboard.push([{ text: `👤 ${c.username || c.telegram_id}`, callback_data: `cust_detail_${c.telegram_id}` }]);
-            });
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }).catch(async () => {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } });
+            });
         } catch (error) { console.error(error.message); }
     });
 
@@ -536,16 +543,18 @@ module.exports = (bot) => {
                     text += `${i + 1}. /${o.order_id} | ${formatters.formatPrice(o.total_amount)} | ${texts.getStatusLabel(o.status)}\n`;
                 });
             }
-            await ctx.reply(text, {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '👤 Kontaktieren', url: `tg://user?id=${targetId}` }],
-                        [{ text: '🔨 Bannen', callback_data: `cust_ban_${targetId}` }],
-                        [{ text: '🗑 Löschen', callback_data: `cust_delete_${targetId}` }],
-                        [{ text: '🔙 Zurück', callback_data: 'master_customer_overview' }]
-                    ]
-                }
+
+            const kb = {
+                inline_keyboard: [
+                    [{ text: '👤 Kontaktieren', url: `tg://user?id=${targetId}` }],
+                    [{ text: '🔨 Bannen', callback_data: `cust_ban_${targetId}` }],
+                    [{ text: '🗑 Löschen', callback_data: `cust_delete_${targetId}` }],
+                    [{ text: '🔙 Zurück', callback_data: 'master_customer_overview' }]
+                ]
+            };
+
+            await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: kb }).catch(async () => {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
             });
         } catch (error) { console.error(error.message); }
     });
@@ -688,4 +697,4 @@ module.exports = (bot) => {
 
         return next();
     });
-}; 
+};
