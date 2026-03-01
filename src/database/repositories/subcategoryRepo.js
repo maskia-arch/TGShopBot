@@ -5,7 +5,6 @@ const getSubcategoriesByCategory = async (categoryId) => {
         .from('subcategories')
         .select('id, name, category_id, sort_order')
         .eq('category_id', categoryId)
-        .eq('is_active', true)
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
     if (error) throw error;
@@ -15,7 +14,7 @@ const getSubcategoriesByCategory = async (categoryId) => {
 const getSubcategoryById = async (id) => {
     const { data, error } = await supabase
         .from('subcategories')
-        .select('id, name, category_id, sort_order, is_active')
+        .select('id, name, category_id, sort_order')
         .eq('id', id)
         .single();
     if (error) throw error;
@@ -42,7 +41,6 @@ const renameSubcategory = async (id, newName) => {
 };
 
 const deleteSubcategory = async (id) => {
-    // Produkte in dieser Unterkategorie verlieren ihre Zuordnung
     await supabase
         .from('products')
         .update({ subcategory_id: null })

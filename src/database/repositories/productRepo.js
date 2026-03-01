@@ -67,7 +67,11 @@ const getProductsBySubcategory = async (subcategoryId, isAdmin = false) => {
 };
 
 const updateProductCategory = async (productId, categoryId) => {
-    const { data, error } = await supabase.from('products').update({ category_id: categoryId }).eq('id', productId).select('id, category_id');
+    const { data, error } = await supabase
+        .from('products')
+        .update({ category_id: categoryId, subcategory_id: null })
+        .eq('id', productId)
+        .select('id, category_id');
     if (error) throw error;
     return data[0];
 };
@@ -117,7 +121,7 @@ const addProduct = async (productData) => {
             description, 
             price, 
             is_unit_price: isUnitPrice,
-            image_url: fileId, // Speichert nun die file_id
+            image_url: fileId,
             delivery_option: deliveryOption || 'none',
             is_active: true, 
             is_out_of_stock: false, 

@@ -27,26 +27,6 @@ const addProductScene = new Scenes.WizardScene(
             return ctx.wizard.next();
         }
 
-        if (!pd.categoryId) {
-            try {
-                const categories = await productRepo.getActiveCategories();
-                if (categories && categories.length > 0) {
-                    const keyboard = categories.map(c => ([{
-                        text: c.name, callback_data: `cat_${c.id}`
-                    }]));
-                    keyboard.push([{ text: 'Ohne Kategorie', callback_data: 'cat_none' }]);
-                    keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
-
-                    await ctx.reply('📂 *Kategorie wählen:*', {
-                        parse_mode: 'Markdown',
-                        reply_markup: { inline_keyboard: keyboard }
-                    });
-                    ctx.wizard.state.step = 'category';
-                    return ctx.wizard.next();
-                }
-            } catch (e) {}
-        }
-
         if (pd.categoryId && pd.subcategoryId === null) {
             try {
                 const subcats = await subcategoryRepo.getSubcategoriesByCategory(pd.categoryId);
@@ -62,6 +42,33 @@ const addProductScene = new Scenes.WizardScene(
                         reply_markup: { inline_keyboard: keyboard }
                     });
                     ctx.wizard.state.step = 'subcategory';
+                    return ctx.wizard.next();
+                }
+            } catch (e) {}
+            
+            await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+            });
+            ctx.wizard.state.step = 'name';
+            return ctx.wizard.next();
+        }
+
+        if (!pd.categoryId) {
+            try {
+                const categories = await productRepo.getActiveCategories();
+                if (categories && categories.length > 0) {
+                    const keyboard = categories.map(c => ([{
+                        text: c.name, callback_data: `cat_${c.id}`
+                    }]));
+                    keyboard.push([{ text: 'Ohne Kategorie', callback_data: 'cat_none' }]);
+                    keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
+
+                    await ctx.reply('📂 *Kategorie wählen:*', {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: keyboard }
+                    });
+                    ctx.wizard.state.step = 'category';
                     return ctx.wizard.next();
                 }
             } catch (e) {}
@@ -100,9 +107,14 @@ const addProductScene = new Scenes.WizardScene(
                             keyboard.push([{ text: 'Ohne Unterkategorie', callback_data: 'subcat_none' }]);
                             keyboard.push([{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]);
 
-                            await ctx.reply('📂 *Unterkategorie wählen:*', {
+                            await ctx.editMessageText('📂 *Unterkategorie wählen:*', {
                                 parse_mode: 'Markdown',
                                 reply_markup: { inline_keyboard: keyboard }
+                            }).catch(async () => {
+                                await ctx.reply('📂 *Unterkategorie wählen:*', {
+                                    parse_mode: 'Markdown',
+                                    reply_markup: { inline_keyboard: keyboard }
+                                });
                             });
                             ctx.wizard.state.step = 'subcategory';
                             return;
@@ -110,9 +122,14 @@ const addProductScene = new Scenes.WizardScene(
                     } catch (e) {}
                 }
 
-                await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                await ctx.editMessageText('📦 Bitte sende den *Namen* des Produkts:', {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                }).catch(async () => {
+                    await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                    });
                 });
                 ctx.wizard.state.step = 'name';
                 return;
@@ -123,9 +140,14 @@ const addProductScene = new Scenes.WizardScene(
                 const subcatId = data.replace('subcat_', '');
                 ctx.wizard.state.productData.subcategoryId = subcatId === 'none' ? 'none' : subcatId;
 
-                await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                await ctx.editMessageText('📦 Bitte sende den *Namen* des Produkts:', {
                     parse_mode: 'Markdown',
                     reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                }).catch(async () => {
+                    await ctx.reply('📦 Bitte sende den *Namen* des Produkts:', {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
+                    });
                 });
                 ctx.wizard.state.step = 'name';
                 return;
@@ -135,7 +157,9 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.description = null;
                 ctx.wizard.state.step = 'price';
-                await ctx.reply('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' });
+                await ctx.editMessageText('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' }).catch(async () => {
+                    await ctx.reply('💰 Preis eingeben (z.B. `12.50`):', { parse_mode: 'Markdown' });
+                });
                 return;
             }
 
@@ -143,7 +167,7 @@ const addProductScene = new Scenes.WizardScene(
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.fileId = null;
                 ctx.wizard.state.step = 'delivery';
-                await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+                await ctx.editMessageText('🚚 *Lieferoption für dieses Produkt:*', {
                     parse_mode: 'Markdown',
                     reply_markup: {
                         inline_keyboard: [
@@ -153,6 +177,18 @@ const addProductScene = new Scenes.WizardScene(
                             [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
                         ]
                     }
+                }).catch(async () => {
+                    await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+                        parse_mode: 'Markdown',
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
+                                [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
+                                [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
+                                [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+                            ]
+                        }
+                    });
                 });
                 return;
             }
@@ -185,11 +221,18 @@ const addProductScene = new Scenes.WizardScene(
                         const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
                         let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
 
-                        await ctx.reply(successText, {
+                        await ctx.editMessageText(successText, {
                             parse_mode: 'Markdown',
                             reply_markup: {
                                 inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
                             }
+                        }).catch(async () => {
+                            await ctx.reply(successText, {
+                                parse_mode: 'Markdown',
+                                reply_markup: {
+                                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+                                }
+                            });
                         });
 
                         if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
