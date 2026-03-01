@@ -15,7 +15,6 @@ module.exports = (bot) => {
             const username = ctx.from.username || ctx.from.first_name || 'Kunde';
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
 
-            // Ban-Check (Master wird nie gebannt)
             if (!isMaster) {
                 const banned = await userRepo.isUserBanned(userId);
                 if (banned) {
@@ -34,7 +33,6 @@ module.exports = (bot) => {
             } else if (role === 'admin') {
                 keyboard = adminMenu();
             } else {
-                // Prüfen ob der Kunde aktive Bestellungen hat
                 const hasOrders = await orderRepo.hasActiveOrders(userId);
                 keyboard = customerMenu(hasOrders);
             }

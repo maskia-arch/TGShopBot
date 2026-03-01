@@ -48,7 +48,6 @@ module.exports = (bot) => {
             
             ctx.answerCbQuery('🗑 Artikel entfernt!').catch(() => {});
             
-            ctx.match = null;
             ctx.update.callback_query.data = 'cart_view';
             return bot.handleUpdate(ctx.update);
         } catch (error) {

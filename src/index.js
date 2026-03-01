@@ -2,20 +2,18 @@ const { Telegraf, Scenes, session } = require('telegraf');
 const http = require('http');
 const config = require('./config');
 
-// Commands
 const startCommand = require('./bot/commands/start');
 const addadminCommand = require('./bot/commands/addadmin');
 const orderCommands = require('./bot/commands/orderCommands');
 
-// Actions
 const shopActions = require('./bot/actions/shopActions');
 const checkoutActions = require('./bot/actions/checkoutActions');
 const adminActions = require('./bot/actions/adminActions');
 const masterActions = require('./bot/actions/masterActions');
 const cartActions = require('./bot/actions/cartActions');
 const orderActions = require('./bot/actions/orderActions');
+const customerActions = require('./bot/actions/customerActions');
 
-// Scenes
 const addProductScene = require('./bot/scenes/addProductScene');
 const addCategoryScene = require('./bot/scenes/addCategoryScene');
 const renameCategoryScene = require('./bot/scenes/renameCategoryScene');
@@ -30,14 +28,11 @@ const addPaymentMethodScene = require('./bot/scenes/addPaymentMethodScene');
 const checkoutScene = require('./bot/scenes/checkoutScene');
 const contactScene = require('./bot/scenes/contactScene');
 
-// Services
 const notificationService = require('./services/notificationService');
 const cronService = require('./services/cronService');
 
-// Middleware
 const { checkBan } = require('./bot/middlewares/auth');
 
-// ── Health-Check Server ──
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shop Bot is alive!');
@@ -55,11 +50,9 @@ if (!config.TELEGRAM_BOT_TOKEN) {
 
 const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
 
-// Services initialisieren
 notificationService.init(bot);
 cronService.init(bot);
 
-// ── Scene Stage ──
 const stage = new Scenes.Stage([
     addProductScene,
     addCategoryScene,
@@ -76,34 +69,29 @@ const stage = new Scenes.Stage([
     contactScene
 ]);
 
-// ── Middleware ──
 bot.use(session());
 bot.use(stage.middleware());
-bot.use(checkBan); // Ban-Check NACH session & stage
+bot.use(checkBan);
 
-// ── Error Handler ──
 bot.catch((err, ctx) => {
     console.error(`Update Error [${ctx.updateType}]:`, err.message);
 });
 
-// ── Commands registrieren ──
 startCommand(bot);
 addadminCommand(bot);
 orderCommands(bot);
 
-// ── Actions registrieren ──
 shopActions(bot);
 cartActions(bot);
 checkoutActions(bot);
 adminActions(bot);
 masterActions(bot);
 orderActions(bot);
+customerActions(bot);
 
-// ── Bot starten ──
 const startBot = () => {
     bot.launch().then(() => {
         console.log(`Bot v${config.VERSION} started`);
-        // Cron-Service starten (alle 60 Minuten abgelaufene Bans prüfen)
         cronService.start(3600000);
     }).catch((error) => {
         console.error('Telegram Connection Error:', error.message);

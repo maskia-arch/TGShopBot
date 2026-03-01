@@ -11,7 +11,7 @@ module.exports = (bot) => {
 
             if (!cart || cart.length === 0) {
                 return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
-                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                    inline_keyboard: [[{ text: '🛍 Zurück zum Shop', callback_data: 'shop_menu' }]]
                 });
             }
 
