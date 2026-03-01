@@ -1,6 +1,5 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
-const { uploadToDezentral } = require('../../utils/imageUploader');
 const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
@@ -24,7 +23,7 @@ const editProductImageScene = new Scenes.WizardScene(
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productId = ctx.scene.state.productId;
-        ctx.wizard.state.lastQuestion = '🖼 *Bild ändern*\n\nBitte sende ein neues Foto.\nTippe "Löschen", um das Bild zu entfernen oder "Abbrechen".';
+        ctx.wizard.state.lastQuestion = '🖼 *Bild oder GIF ändern*\n\nBitte sende ein neues Foto, ein GIF oder ein kurzes Video.\nTippe "Löschen", um das Medium zu entfernen oder "Abbrechen".';
 
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -62,33 +61,28 @@ const editProductImageScene = new Scenes.WizardScene(
             return;
         }
 
-        let finalImageUrl = undefined;
+        let finalFileId = undefined;
 
         if (ctx.message.photo) {
-            try {
-                const photo = ctx.message.photo[ctx.message.photo.length - 1];
-                const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-                const statusMsg = await ctx.reply('⏳ Bild wird verarbeitet...', { reply_markup: { remove_keyboard: true } });
-                ctx.wizard.state.messagesToDelete.push(statusMsg.message_id);
-                finalImageUrl = await uploadToDezentral(fileLink.href);
-            } catch (error) {
-                console.error('Upload Error:', error.message);
-                finalImageUrl = null;
-            }
+            finalFileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        } else if (ctx.message.animation) {
+            finalFileId = ctx.message.animation.file_id;
+        } else if (ctx.message.video) {
+            finalFileId = ctx.message.video.file_id;
         } else if (input && input.toLowerCase() === 'löschen') {
-            finalImageUrl = null;
-        } else if (input && input.startsWith('http')) {
-            finalImageUrl = input;
+            finalFileId = null;
+        } else if (input && input.length > 20) {
+            finalFileId = input;
         }
 
         try {
-            if (finalImageUrl !== undefined) {
-                await productRepo.updateProductImage(productId, finalImageUrl);
+            if (finalFileId !== undefined) {
+                await productRepo.updateProductImage(productId, finalFileId);
                 await cleanup(ctx);
-                await ctx.reply('✅ Bild erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
+                await ctx.reply('✅ Medium erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
             } else {
                 await cleanup(ctx);
-                await ctx.reply(texts.getGeneralError(), { reply_markup: { remove_keyboard: true } });
+                await ctx.reply('⚠️ Ungültiges Format. Bitte sende ein Bild oder ein GIF.', { reply_markup: { remove_keyboard: true } });
             }
             return backToProduct(ctx);
         } catch (error) {

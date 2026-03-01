@@ -132,9 +132,20 @@ module.exports = (bot) => {
             keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
 
             if (product.image_url) {
-                try { await ctx.replyWithPhoto(product.image_url, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard }); }
-                catch (e) { await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard }); }
-            } else { await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard }); }
+                const fileId = product.image_url;
+                try {
+                    // Telegram unterscheidet intern nach File-Typen. 
+                    // Wir versuchen es erst als Animation (GIF), dann als Foto.
+                    await ctx.replyWithAnimation(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
+                        .catch(async () => {
+                            await ctx.replyWithPhoto(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                        });
+                } catch (e) {
+                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+                }
+            } else {
+                await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+            }
         } catch (error) { console.error(error.message); }
     });
 

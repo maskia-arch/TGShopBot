@@ -1,7 +1,6 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
-const imageUploader = require('../../utils/imageUploader');
 const uiHelper = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
 const config = require('../../config');
@@ -10,16 +9,15 @@ const notificationService = require('../../services/notificationService');
 const addProductScene = new Scenes.WizardScene(
     'addProductScene',
     async (ctx) => {
-        // Initialer State
         ctx.wizard.state.productData = {
             categoryId: ctx.scene.state?.categoryId || null,
             subcategoryId: ctx.scene.state?.subcategoryId || null,
-            deliveryOption: 'none'
+            deliveryOption: 'none',
+            fileId: null
         };
 
         const pd = ctx.wizard.state.productData;
 
-        // Fall 1: Kategorie und Unterkategorie sind schon bekannt -> Direkt zum Namen
         if (pd.categoryId && pd.subcategoryId !== null) {
             await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
                 parse_mode: 'Markdown',
@@ -29,7 +27,6 @@ const addProductScene = new Scenes.WizardScene(
             return ctx.wizard.next();
         }
 
-        // Fall 2: Keine Kategorie bekannt -> Frage nach Kategorie
         if (!pd.categoryId) {
             try {
                 const categories = await productRepo.getActiveCategories();
@@ -50,7 +47,6 @@ const addProductScene = new Scenes.WizardScene(
             } catch (e) {}
         }
 
-        // Fall 3: Kategorie bekannt, aber Unterkategorie fehlt -> Frage nach Unterkategorie
         if (pd.categoryId && pd.subcategoryId === null) {
             try {
                 const subcats = await subcategoryRepo.getSubcategoriesByCategory(pd.categoryId);
@@ -71,7 +67,6 @@ const addProductScene = new Scenes.WizardScene(
             } catch (e) {}
         }
 
-        // Fallback: Wenn keine DB-Einträge da sind, springe direkt zum Namen
         await ctx.reply('📦 *Neues Produkt*\n\nBitte sende den *Namen* des Produkts:', {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_add' }]] }
@@ -136,7 +131,6 @@ const addProductScene = new Scenes.WizardScene(
                 return;
             }
 
-            // Skip handling inside the step
             if (ctx.wizard.state.step === 'description' && data === 'skip_desc') {
                 ctx.answerCbQuery().catch(() => {});
                 ctx.wizard.state.productData.description = null;
@@ -147,7 +141,7 @@ const addProductScene = new Scenes.WizardScene(
 
             if (ctx.wizard.state.step === 'image' && data === 'skip_img') {
                 ctx.answerCbQuery().catch(() => {});
-                ctx.wizard.state.productData.imageUrl = null;
+                ctx.wizard.state.productData.fileId = null;
                 ctx.wizard.state.step = 'delivery';
                 await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
                     parse_mode: 'Markdown',
@@ -184,7 +178,7 @@ const addProductScene = new Scenes.WizardScene(
                             name: pd.name,
                             description: pd.description,
                             price: pd.price,
-                            imageUrl: pd.imageUrl,
+                            fileId: pd.fileId,
                             deliveryOption: pd.deliveryOption
                         });
                         
@@ -243,39 +237,44 @@ const addProductScene = new Scenes.WizardScene(
             ctx.wizard.state.productData.price = price;
             ctx.wizard.state.step = 'image';
 
-            await ctx.reply('🖼 Produktbild senden oder überspringen:', {
+            await ctx.reply('🖼 Produktbild oder GIF senden (oder überspringen):', {
                 reply_markup: { inline_keyboard: [[{ text: '⏩ Überspringen', callback_data: 'skip_img' }]] }
             });
             return;
         }
 
-        if (ctx.wizard.state.step === 'image' && ctx.message?.photo) {
-            const photo = ctx.message.photo[ctx.message.photo.length - 1];
-            try {
-                const fileLink = await ctx.telegram.getFileLink(photo.file_id);
-                ctx.wizard.state.productData.imageUrl = fileLink.href;
-            } catch (e) {
-                ctx.wizard.state.productData.imageUrl = null;
+        if (ctx.wizard.state.step === 'image') {
+            let fileId = null;
+            if (ctx.message?.photo) {
+                fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            } else if (ctx.message?.animation) {
+                fileId = ctx.message.animation.file_id;
+            } else if (ctx.message?.video) {
+                fileId = ctx.message.video.file_id;
             }
-            
-            ctx.wizard.state.step = 'delivery';
-            await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
-                        [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
-                        [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
-                        [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
-                    ]
-                }
-            });
+
+            if (fileId) {
+                ctx.wizard.state.productData.fileId = fileId;
+                ctx.wizard.state.step = 'delivery';
+                await ctx.reply('🚚 *Lieferoption für dieses Produkt:*', {
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
+                            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
+                            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
+                            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+                        ]
+                    }
+                });
+            } else {
+                await ctx.reply('⚠️ Bitte sende ein Bild, ein GIF oder ein kurzes Video.');
+            }
             return;
         }
     }
 );
 
-// Nur den generellen Cancel-Button hier unten lassen
 addProductScene.action('cancel_add', async (ctx) => {
     ctx.answerCbQuery('Abgebrochen').catch(() => {});
     await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);

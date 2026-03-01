@@ -40,7 +40,7 @@ const updateCategorySortOrder = async (id, sortOrder) => {
 const getProductsByCategory = async (categoryId, isAdmin = false) => {
     let query = supabase
         .from('products')
-        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order');
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url');
     
     if (categoryId === null || categoryId === 'none') {
         query = query.is('category_id', null);
@@ -57,7 +57,7 @@ const getProductsByCategory = async (categoryId, isAdmin = false) => {
 const getProductsBySubcategory = async (subcategoryId, isAdmin = false) => {
     let query = supabase
         .from('products')
-        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order')
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url')
         .eq('subcategory_id', subcategoryId);
     if (!isAdmin) query = query.eq('is_active', true);
 
@@ -78,8 +78,12 @@ const toggleProductStatus = async (productId, field, value) => {
     return data[0];
 };
 
-const updateProductImage = async (productId, imageUrl) => {
-    const { data, error } = await supabase.from('products').update({ image_url: imageUrl }).eq('id', productId).select('id, image_url');
+const updateProductImage = async (productId, fileId) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ image_url: fileId })
+        .eq('id', productId)
+        .select('id, image_url');
     if (error) throw error;
     return data[0];
 };
@@ -103,14 +107,21 @@ const getProductById = async (productId) => {
 };
 
 const addProduct = async (productData) => {
-    const { categoryId, subcategoryId, name, description, price, isUnitPrice, imageUrl, deliveryOption } = productData;
+    const { categoryId, subcategoryId, name, description, price, isUnitPrice, fileId, deliveryOption } = productData;
     const { data, error } = await supabase
         .from('products')
         .insert([{
-            category_id: categoryId, subcategory_id: subcategoryId || null,
-            name, description, price, is_unit_price: isUnitPrice,
-            image_url: imageUrl, delivery_option: deliveryOption || 'none',
-            is_active: true, is_out_of_stock: false, sort_order: 0
+            category_id: categoryId, 
+            subcategory_id: subcategoryId || null,
+            name, 
+            description, 
+            price, 
+            is_unit_price: isUnitPrice,
+            image_url: fileId, // Speichert nun die file_id
+            delivery_option: deliveryOption || 'none',
+            is_active: true, 
+            is_out_of_stock: false, 
+            sort_order: 0
         }])
         .select('id');
     if (error) throw error;

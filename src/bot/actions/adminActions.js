@@ -288,10 +288,12 @@ module.exports = (bot) => {
             ]};
 
             if (product.image_url) {
+                const fileId = product.image_url;
                 try {
-                    await ctx.replyWithPhoto(product.image_url, {
-                        caption: text, parse_mode: 'Markdown', reply_markup: keyboard
-                    });
+                    await ctx.replyWithAnimation(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard })
+                        .catch(async () => {
+                            await ctx.replyWithPhoto(fileId, { caption: text, parse_mode: 'Markdown', reply_markup: keyboard });
+                        });
                 } catch (e) {
                     await uiHelper.updateOrSend(ctx, text, keyboard);
                 }
@@ -429,11 +431,11 @@ module.exports = (bot) => {
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 await approvalRepo.createApproval(ctx.match[1], 'DELETE', null, adminName);
                 ctx.answerCbQuery('Löschanfrage gesendet.').catch(() => {});
-                await uiHelper.updateOrSend(ctx, `🔔 Löschanfrage für *${product?.name || 'Produkt'}* wurde an den Master gesendet.`, {
+                await uiHelper.updateOrSend(ctx, `🔔 Löschanfrage für *${product.name || 'Produkt'}* wurde an den Master gesendet.`, {
                     inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
                 });
             }
-        } catch (error) { 
+               } catch (error) { 
             console.error(error.message); 
         }
     });
