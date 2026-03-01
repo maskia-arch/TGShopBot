@@ -160,10 +160,46 @@ module.exports = (bot) => {
             if (!subcat) return;
             const keyboard = { inline_keyboard: [
                 [{ text: '✏️ Umbenennen', callback_data: `admin_rename_subcat_${subcat.id}` }],
+                [
+                    { text: '🔼 Hoch', callback_data: `admin_sort_subcat_up_${subcat.id}` },
+                    { text: '🔽 Runter', callback_data: `admin_sort_subcat_down_${subcat.id}` }
+                ],
                 [{ text: '🗑 Löschen', callback_data: `admin_del_subcat_${subcat.id}` }],
                 [{ text: '🔙 Zurück', callback_data: `admin_edit_cat_${subcat.category_id}` }]
             ]};
             await uiHelper.updateOrSend(ctx, `📂 Unterkategorie: *${subcat.name}*`, keyboard);
+        } catch (error) { 
+            console.error(error.message); 
+        }
+    });
+
+    // ─── NEU: UNTERKATEGORIEN SORTIEREN ───
+    bot.action(/^admin_sort_subcat_(up|down)_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const direction = ctx.match[1];
+            const id = ctx.match[2];
+            const subcat = await subcategoryRepo.getSubcategoryById(id);
+            if (!subcat) return;
+
+            const subcats = await subcategoryRepo.getSubcategoriesByCategory(subcat.category_id);
+            const index = subcats.findIndex(sc => sc.id == id);
+
+            if ((direction === 'up' && index > 0) || (direction === 'down' && index < subcats.length - 1)) {
+                const swapIndex = direction === 'up' ? index - 1 : index + 1;
+                await Promise.all(subcats.map((sc, i) => {
+                    let newOrder = i;
+                    if (i === index) newOrder = swapIndex;
+                    else if (i === swapIndex) newOrder = index;
+                    return subcategoryRepo.updateSubcategorySortOrder(sc.id, newOrder);
+                }));
+                ctx.answerCbQuery('✅').catch(() => {});
+            } else {
+                ctx.answerCbQuery('Nicht möglich.').catch(() => {});
+            }
+            
+            // Lade die Ansicht neu
+            ctx.update.callback_query.data = `admin_edit_subcat_${id}`;
+            return bot.handleUpdate(ctx.update);
         } catch (error) { 
             console.error(error.message); 
         }
@@ -290,7 +326,6 @@ module.exports = (bot) => {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return;
             
-            // --- NEU: PFAD ERMITTELN FÜR DIE ADMIN ANSICHT ---
             let path = 'Kategorielos';
             try {
                 if (product.category_id) {
@@ -304,13 +339,12 @@ module.exports = (bot) => {
                     }
                 }
             } catch (e) {}
-            // ---------------------------------------------------
 
             const deliveryOpt = product.delivery_option || 'none';
             const deliveryLabel = texts.getDeliveryLabel(deliveryOpt);
             
             let text = `*${product.name}*\n`;
-            text += `📂 _In: ${path}_\n\n`; // HIER WIRD DER PFAD ANGEZEIGT
+            text += `📂 _In: ${path}_\n\n`;
             text += `💰 Preis: ${formatters.formatPrice(product.price)}\n`;
             text += `📦 Aktiv: ${product.is_active ? '✅' : '❌'}\n`;
             text += `📋 Verfügbar: ${product.is_out_of_stock ? '❌ Ausverkauft' : '✅'}\n`;

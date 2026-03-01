@@ -1,10 +1,16 @@
-# 🤖 t.me/autoacts – Shop Bot Core | v0.3.7
+# 🤖 t.me/autoacts – Shop Bot Core | v0.4.0
 
 Ein professionelles Telegram-E-Commerce-System mit hierarchischer Rechteverwaltung, flexiblem Liefersystem, manuellem Zahlungsflow und dezentraler Datenstruktur. Entwickelt von [t.me/autoacts](https://t.me/autoacts).
 
 ---
 
 ## 🆕 Changelog
+
+### v0.4.0 – Strukturierte Übersicht & Pfad-Transparenz
+- **📂 Erweitertes Drill-Down Admin-Menü:** Die Produktverwaltung wurde komplett neu strukturiert. Admins navigieren nun übersichtlich durch `Kategorie » Unterkategorie » Produkte`, anstatt in langen Listen zu scrollen.
+- **🔄 Spam-freies Sortieren:** Die Positionsänderung (🔼/🔽) von Produkten und Kategorien erfolgt nun geräuschlos via Text/Bild-Edit, ohne den Chat mit neuen Nachrichten zu spammen. Auch Unterkategorien lassen sich nun frei sortieren.
+- **📍 Kategorie-Pfade auf Rechnungen:** Produkte speichern beim Hinzufügen in den Warenkorb nun ihren Ursprungspfad (z.B. _Deutschland » Unlimited_). Dieser Pfad wird transparent auf der Kundenrechnung und in der Admin-Bestellübersicht angezeigt.
+- **🛡️ Robuster Admin-Fallback:** Falls Telegram Daten verschluckt, holt sich der Bot für die Admin-Benachrichtigung (TX-ID) nun alle relevanten Infos als Fallback direkt aus der Datenbank.
 
 ### v0.3.7 – UX-Optimierungen & Smart Cleaning
 - **🧹 Intelligentes Löschen (Smart Cleaning):** Der Bot merkt sich die IDs von Admin-Benachrichtigungen ("Neue Bestellung", "TX-ID erhalten"). Wird eine Bestellung vom Admin bearbeitet oder gelöscht, räumt der Bot den Chat automatisch auf und löscht die obsoleten Benachrichtigungen.
@@ -39,7 +45,7 @@ Ein professionelles Telegram-E-Commerce-System mit hierarchischer Rechteverwaltu
 
 ## 🏗 Architektur @autoacts
 
-### Bestellfluss (v0.3.7)
+### Bestellfluss (v0.4.0)
 
 Kunde: Shop → Warenkorb → Checkout
 ↓
@@ -47,7 +53,7 @@ Kunde: Shop → Warenkorb → Checkout
 ↓
 [Versandadresse als Privnote-Link (nur bei Versand)]
 ↓
-Zahlungsart wählen → Rechnung mit Wallet-Adresse
+Zahlungsart wählen → Rechnung mit Kategorie-Pfad & Wallet-Adresse
 ↓
 "Bestellung abschicken" → Order erstellt
 ↓
@@ -63,6 +69,7 @@ Status: "Bezahlt? (Prüfung)" → Admin prüft
 ↓
 Admin: Klickt auf "Bestellung öffnen"
 → Bot löscht "NEUE BESTELLUNG" Nachricht aus dem Chat (Smart Cleaning)
+→ Pfad-Transparenz bei bestellten Artikeln
 → Status manuell ändern → Kunde erhält Update
 
 
@@ -107,19 +114,20 @@ Admin: Klickt auf "Bestellung öffnen"
 
 ### 🛠 Admin-Panel
 - Kategorien & Unterkategorien (CRUD, Sortierung)
+- **NEU:** Drill-Down-Navigation (`Kategorien » Unterkategorien » Produkte`) für mehr Übersicht.
 - Produkte verwalten (Preis, Bild, Beschreibung, Lieferoption, Aktiv/Ausverkauft)
 - Lieferoption zyklisch ändern: Digital → Versand → Abholung → Beide
 - Offene Bestellungen mit 1-Klick Statusänderung
 - Admin-Notizen pro Bestellung
 - Rundnachrichten an alle Kunden
-- **NEU:** Automatisches Chat-Cleaning bei der Bearbeitung von Bestellungen.
+- Automatisches Chat-Cleaning bei der Bearbeitung von Bestellungen.
 
 ### 💳 Kunden-Interface
 - Kategorien & Produkte durchsuchen
 - Warenkorb mit Mengenauswahl
 - Checkout mit Lieferoptionswahl
 - Privnote-basierte Adresseingabe (Sicherheit)
-- Rechnung mit kopierbarer Zahlungsadresse
+- Rechnung mit kopierbarer Zahlungsadresse **und Kategorie-Pfaden**
 - TX-ID Zahlungsbestätigung
 - Bestellübersicht mit Status-Tracking
 - Ping & Kontaktanfrage an Admins
@@ -139,26 +147,24 @@ Stelle sicher, dass Node.js (v18+) installiert ist.
 npm install
 
 2. Datenbank (Supabase)
-Die gesamte Datenbankstruktur (inklusive aller Updates bis v0.3.7) ist in einer einzigen Datei zusammengefasst.
+Die gesamte Datenbankstruktur (inklusive aller Updates bis v0.4.0) ist in einer einzigen Datei zusammengefasst.
 Öffne den SQL Editor in deinem Supabase Dashboard.
 Kopiere den gesamten Inhalt der Datei SETUP.txt in den Editor und führe das Script aus.
 (Hinweis: Dieses Script löscht bestehende Tabellen für einen sauberen Install!)
 3. Environment Variables
 Lege diese Variablen in deiner .env Datei oder in den Settings deines Hosters (z.B. Render.com) an:
-  
 TELEGRAM_BOT_TOKEN=your_bot_token
 SUPABASE_URL=[https://your-project.supabase.co](https://your-project.supabase.co)
 SUPABASE_KEY=your_service_role_key   <-- WICHTIG: Service Role Key nutzen!
 MASTER_ADMIN_ID=your_telegram_id
-VERSION=0.3.7
+VERSION=0.4.0
 PORT=10000
 
-4. Starten
+4. Starten 
 node src/index.js
-
 Für Hosting auf Render.com: Web Service erstellen, Health-Check auf Port 10000.
-📁 Projektstruktur
 
+📁 Projektstruktur
 src/
 ├── index.js                    # Bot-Setup, Middleware, Stage
 ├── config/index.js             # Konfiguration & Version
@@ -167,7 +173,7 @@ src/
 │   └── repositories/
 │       ├── productRepo.js      # Produkte & Kategorien
 │       ├── orderRepo.js        # Bestellungen, TX-ID & Notification-IDs
-│       ├── cartRepo.js         # Warenkorb
+│       ├── cartRepo.js         # Warenkorb (inkl. category_path)
 │       ├── userRepo.js         # User, Rollen, Bans
 │       ├── paymentRepo.js      # Zahlungsarten
 │       ├── subcategoryRepo.js  # Unterkategorien
@@ -190,7 +196,7 @@ src/
 │   │   ├── addCategoryScene.js
 │   │   ├── addSubcategoryScene.js
 │   │   ├── addPaymentMethodScene.js
-│   │   ├── askQuantityScene.js
+│   │   ├── askQuantityScene.js # Übergibt den Kategorie-Pfad an den Warenkorb
 │   │   ├── broadcastScene.js
 │   │   ├── contactScene.js
 │   │   ├── editPriceScene.js
@@ -209,13 +215,13 @@ src/
 │   └── cronService.js          # Ban-Ablauf Prüfung
 └── utils/
     ├── texts.js                # Alle Bot-Texte (DE)
-    ├── formatters.js           # Preis, Datum, Rechnung
+    ├── formatters.js           # Preis, Datum, Rechnung (inkl. Pfad-Anzeige)
     ├── uiHelper.js             # updateOrSend, sendTemporary
+    ├── orderHelper.js          # Detailansicht für Admins
     └── imageUploader.js        # Bild-Upload Handling
-    
-    🔧 Bot-Befehle
-    
-    Befehl Rolle Beschreibung
+
+🔧 Bot-Befehle
+Befehl Rolle Beschreibung
 /start Alle Hauptmenü (rollenbasiert)
 /orders Admin Alle Bestellungen anzeigen
 /orderid ORD-XXXXX Admin Einzelne Bestellung öffnen
@@ -235,5 +241,4 @@ Runtime: Node.js
 Bot Framework: Telegraf v4 (WizardScene, Session)
 Datenbank: Supabase (PostgreSQL)
 Hosting: Render.com (mit Health-Check Server)
-
 Powered by t.me/autoacts – Sicherheit, Diskretion und Effizienz.

@@ -2,7 +2,7 @@
       t.me/autoacts - Shop Bot Setup
 =========================================
 Autor: t.me/autoacts
-Version: 0.3.7
+Version: 0.4.0
 
 Diese Anleitung führt dich durch die komplette Neuinstallation 
 des Shop Bots von Null auf Hundert.
@@ -52,7 +52,7 @@ des Shop Bots von Null auf Hundert.
      SUPABASE_URL       = (Deine Supabase URL)
      SUPABASE_KEY       = (Dein Service Role Key)
      MASTER_ADMIN_ID    = (Deine Telegram ID)
-     VERSION            = 0.3.7
+     VERSION            = 0.4.0
      PORT               = 10000
 
 =========================================
@@ -67,7 +67,7 @@ des Shop Bots von Null auf Hundert.
 
 
 -- ============================================================
--- TGShopBot v0.3.7 – KOMPLETTES SCHEMA (Neuinstallation)
+-- TGShopBot v0.4.0 – KOMPLETTES SCHEMA (Neuinstallation)
 -- WICHTIG: Dieses Script löscht ALLE bestehenden Tabellen
 -- und erstellt sie neu. NUR für Neuinstallation verwenden!
 -- ============================================================
@@ -172,7 +172,8 @@ CREATE TABLE carts (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    quantity INTEGER DEFAULT 1
+    quantity INTEGER DEFAULT 1,
+    category_path TEXT
 );
 
 CREATE INDEX idx_carts_user ON carts(user_id);
@@ -309,6 +310,16 @@ BEGIN
     
     IF EXISTS (
         SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'carts' AND column_name = 'category_path'
+    ) THEN
+        RAISE NOTICE '✅ Spalte category_path in carts vorhanden';
+    ELSE
+        RAISE NOTICE '❌ Spalte category_path in carts fehlt';
+        all_ok := false;
+    END IF;
+    
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'notification_msg_ids'
     ) THEN
         RAISE NOTICE '✅ Spalte notification_msg_ids in orders vorhanden';
@@ -339,7 +350,7 @@ BEGIN
 
     IF all_ok THEN
         RAISE NOTICE '══════════════════════════════════════';
-        RAISE NOTICE '✅ SCHEMA v0.3.7 KOMPLETT INSTALLIERT';
+        RAISE NOTICE '✅ SCHEMA v0.4.0 KOMPLETT INSTALLIERT';
         RAISE NOTICE '══════════════════════════════════════';
     END IF;
 END $$;
