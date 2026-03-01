@@ -6,6 +6,7 @@ const getCart = async (userId) => {
         .select(`
             id,
             quantity,
+            category_path,
             products ( id, name, price, is_unit_price )
         `)
         .eq('user_id', userId);
@@ -14,32 +15,38 @@ const getCart = async (userId) => {
     return data;
 };
 
-const addToCart = async (userId, productId, quantity, username = 'Kunde') => {
-    // Upsert parallel zum Check oder minimiert
+const addToCart = async (userId, productId, quantity, username = 'Kunde', categoryPath = null) => {
     await supabase.from('users').upsert(
         { telegram_id: userId, username: username }, 
         { onConflict: 'telegram_id' }
     );
 
-    // Nutze rpc (Stored Procedure) oder optimierten Check
     const { data: existing, error: fetchError } = await supabase
         .from('carts')
         .select('id, quantity')
         .eq('user_id', userId)
         .eq('product_id', productId)
-        .maybeSingle(); // Schneller als .single() mit Error-Handling
+        .maybeSingle();
 
     if (fetchError) throw fetchError;
 
     if (existing) {
         return supabase
             .from('carts')
-            .update({ quantity: existing.quantity + quantity })
+            .update({ 
+                quantity: existing.quantity + quantity,
+                category_path: categoryPath 
+            })
             .eq('id', existing.id);
     } else {
         return supabase
             .from('carts')
-            .insert([{ user_id: userId, product_id: productId, quantity }]);
+            .insert([{ 
+                user_id: userId, 
+                product_id: productId, 
+                quantity,
+                category_path: categoryPath
+            }]);
     }
 };
 
@@ -62,11 +69,12 @@ const getCartDetails = async (userId) => {
         const itemTotal = item.quantity * itemPrice;
         return {
             id: item.id,
-            product_id: item.products.id, // Konsistente Benennung für Actions
+            product_id: item.products.id,
             name: item.products.name,
             quantity: item.quantity,
             price: itemPrice,
-            total: itemTotal
+            total: itemTotal,
+            category_path: item.category_path
         };
     });
 };

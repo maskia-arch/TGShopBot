@@ -1,5 +1,6 @@
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
+const categoryRepo = require('../../database/repositories/categoryRepo'); // Neu importiert falls vorhanden, sonst über productRepo
 const orderRepo = require('../../database/repositories/orderRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
@@ -160,7 +161,19 @@ module.exports = (bot) => {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return;
 
-            let text = `*${product.name}*\n\n💰 ${formatters.formatPrice(product.price)}`;
+            let path = '';
+            try {
+                const cat = await productRepo.getCategoryById(product.category_id);
+                path = cat ? cat.name : '';
+                if (product.subcategory_id) {
+                    const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
+                    if (subcat) path += ` » ${subcat.name}`;
+                }
+            } catch (e) {}
+
+            let text = `*${product.name}*\n`;
+            if (path) text += `_In: ${path}_\n`;
+            text += `\n💰 ${formatters.formatPrice(product.price)}`;
             if (product.description) text += `\n\n📝 ${product.description}`;
             
             const backCb = product.subcategory_id ? `subcategory_${product.subcategory_id}` : product.category_id ? `category_${product.category_id}` : 'shop_menu';
@@ -193,7 +206,19 @@ module.exports = (bot) => {
 
     bot.action(/^add_to_cart_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
-        try { await ctx.scene.enter('askQuantityScene', { productId: ctx.match[1] }); } 
+        try {
+            const product = await productRepo.getProductById(ctx.match[1]);
+            let path = '';
+            if (product) {
+                const cat = await productRepo.getCategoryById(product.category_id);
+                path = cat ? cat.name : '';
+                if (product.subcategory_id) {
+                    const subcat = await subcategoryRepo.getSubcategoryById(product.subcategory_id);
+                    if (subcat) path += ` » ${subcat.name}`;
+                }
+            }
+            await ctx.scene.enter('askQuantityScene', { productId: ctx.match[1], categoryPath: path }); 
+        } 
         catch (error) { console.error(error.message); }
     });
 

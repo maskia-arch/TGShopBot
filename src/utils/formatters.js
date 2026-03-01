@@ -14,7 +14,8 @@ const formatInvoice = (items, total, paymentMethod, orderId = null) => {
     text += '\n';
 
     items.forEach(item => {
-        text += `▪️ ${item.quantity}x ${item.name} (${formatPrice(item.price)}) = ${formatPrice(item.total)}\n`;
+        const path = item.category_path ? `_${item.category_path}_ » ` : '';
+        text += `▪️ ${item.quantity}x ${path}${item.name} (${formatPrice(item.price)}) = ${formatPrice(item.total)}\n`;
     });
 
     text += `\n━━━━━━━━━━━━━━━\n`;
