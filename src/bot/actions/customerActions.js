@@ -127,11 +127,13 @@ module.exports = (bot) => {
                     reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
                 });
                 const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
+                
                 notificationService.notifyAdminsTxId({
                     orderId, userId: ctx.from.id, username,
                     total: formatters.formatPrice(updated.total_amount || 0),
                     paymentName: updated.payment_method_name || 'N/A',
-                    txId: input
+                    txId: input,
+                    deliveryMethod: updated.delivery_method
                 }).catch(() => {});
             } catch (error) {
                 console.error('TX-ID Save Error:', error.message);

@@ -14,7 +14,15 @@ const sendTo = async (chatId, text, options = {}) => {
     try {
         return await botInstance.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...options });
     } catch (e) {
-        // Ignoriere Blockierungen leise für den Log, liefere null zurück
+        return null;
+    }
+};
+
+const editAdminMessage = async (chatId, messageId, text, options = {}) => {
+    if (!botInstance) return null;
+    try {
+        return await botInstance.telegram.editMessageText(chatId, messageId, null, text, { parse_mode: 'Markdown', ...options });
+    } catch (e) {
         return null;
     }
 };
@@ -77,7 +85,7 @@ const notifyAdminsNewOrder = async (data) => {
 
 const notifyAdminsTxId = async (data) => {
     try {
-        const admins = await userRepo.getAllAdmins();
+        const order = await orderRepo.getOrderByOrderId(data.orderId);
         const text = texts.getAdminTxIdNotify(data);
 
         const keyboard = {
@@ -87,27 +95,44 @@ const notifyAdminsTxId = async (data) => {
             ]
         };
 
-        const notifyPromises = [];
+        if (order && order.notification_msg_ids && order.notification_msg_ids.length > 0) {
+            const updatePromises = order.notification_msg_ids.map(async (notif) => {
+                const edited = await editAdminMessage(notif.chat_id, notif.message_id, text, { reply_markup: keyboard });
+                if (!edited) {
+                    const msg = await sendTo(notif.chat_id, text, { reply_markup: keyboard });
+                    if (msg && msg.message_id) {
+                        return { chat_id: notif.chat_id, message_id: msg.message_id };
+                    }
+                }
+                return notif;
+            });
+            
+            const results = await Promise.all(updatePromises);
+            
+        } else {
+            const admins = await userRepo.getAllAdmins();
+            const notifyPromises = [];
 
-        for (const admin of admins) {
-            const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) {
-                    return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
-                }
-            }).catch(() => {});
-            notifyPromises.push(p);
+            for (const admin of admins) {
+                const p = sendTo(admin.telegram_id, text, { reply_markup: keyboard }).then(msg => {
+                    if (msg && msg.message_id) {
+                        return orderRepo.addNotificationMsgId(data.orderId, admin.telegram_id, msg.message_id);
+                    }
+                }).catch(() => {});
+                notifyPromises.push(p);
+            }
+            
+            if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
+                 const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
+                    if (msg && msg.message_id) {
+                         return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
+                    }
+                }).catch(() => {});
+                notifyPromises.push(p);
+            }
+            
+            await Promise.all(notifyPromises);
         }
-        
-        if (!admins.find(a => Number(a.telegram_id) === Number(config.MASTER_ADMIN_ID))) {
-             const p = sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).then(msg => {
-                if (msg && msg.message_id) {
-                     return orderRepo.addNotificationMsgId(data.orderId, config.MASTER_ADMIN_ID, msg.message_id);
-                }
-            }).catch(() => {});
-            notifyPromises.push(p);
-        }
-        
-        await Promise.all(notifyPromises);
     } catch (error) {
         console.error('Notify TxId Error:', error.message);
     }
