@@ -3,7 +3,7 @@ const approvalRepo = require('../../database/repositories/approvalRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
-const orderHelper = require('../../utils/orderHelper'); // NEU: Helper importiert
+const orderHelper = require('../../utils/orderHelper'); 
 const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
@@ -70,6 +70,7 @@ module.exports = (bot) => {
             });
         } catch (error) { console.error('Confirm Pay Error:', error.message); }
     });
+
     bot.action('admin_open_orders', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -117,7 +118,10 @@ module.exports = (bot) => {
     bot.action(/^ostatus_([\w-]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
-            const newStatus = ctx.match[2];
+            let newStatus = ctx.match[2];
+            
+            if (newStatus === 'processing') newStatus = 'in_bearbeitung';
+
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
 
@@ -134,8 +138,29 @@ module.exports = (bot) => {
 
             const payload = await orderHelper.buildOrderViewPayload(updated);
             await ctx.editMessageText(payload.text, { parse_mode: 'Markdown', reply_markup: payload.reply_markup });
+            ctx.answerCbQuery(`✅ Status: ${texts.getStatusLabel(newStatus)}`).catch(() => {});
         } catch (error) { console.error(error.message); }
     });
+
+    bot.action(/^odeliv_([\w-]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingDigitalDelivery = orderId;
+            await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
+            });
+        } catch (error) { console.error(error.message); }
+    });
+
+    bot.action('cancel_delivery', async (ctx) => {
+        ctx.answerCbQuery('Abgebrochen').catch(() => {});
+        if (ctx.session) ctx.session.awaitingDigitalDelivery = null;
+        await ctx.reply('❌ Digitale Auslieferung abgebrochen.');
+    });
+
     bot.action(/^odel_([\w-]+)$/, isAdmin, async (ctx) => {
         const orderId = ctx.match[1];
         if (ctx.from.id === Number(config.MASTER_ADMIN_ID)) {
@@ -143,7 +168,6 @@ module.exports = (bot) => {
                 reply_markup: { inline_keyboard: [[{ text: '🗑 Löschen', callback_data: `odel_confirm_${orderId}` }], [{ text: '❌ Nein', callback_data: `oview_${orderId}` }]] }
             });
         }
-        // Admin-Löschanfrage Logik...
         const approval = await approvalRepo.createApprovalRequest('ORDER_DELETE', ctx.from.id, orderId, orderId);
         ctx.reply('📨 Löschanfrage an Master gesendet.');
         notificationService.sendTo(config.MASTER_ADMIN_ID, `🗑 *Löschanfrage*\nBestellung: \`#${orderId}\``, {
@@ -157,7 +181,33 @@ module.exports = (bot) => {
         if (input.startsWith('/')) {
             ctx.session.awaitingTxId = null;
             ctx.session.awaitingNote = null;
+            ctx.session.awaitingDigitalDelivery = null;
             return next();
+        }
+
+        if (ctx.session.awaitingDigitalDelivery) {
+            const orderId = ctx.session.awaitingDigitalDelivery;
+            ctx.session.awaitingDigitalDelivery = null;
+            try {
+                const order = await orderRepo.getOrderByOrderId(orderId);
+                if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
+                await orderHelper.clearOldNotifications(ctx, order);
+                const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
+                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
+                const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown' }).catch(() => null);
+                if (sentMsg) {
+                    const updated = await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+                    await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
+                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Digitale Lieferung gesendet.`);
+                    await ctx.reply(texts.getDigitalDeliverySuccess(orderId), { 
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
+                    });
+                } else {
+                    await ctx.reply(`❌ Fehler: Nachricht konnte nicht gesendet werden.`);
+                }
+            } catch (error) { console.error(error.message); }
+            return;
         }
 
         if (ctx.session.awaitingTxId) {

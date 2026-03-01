@@ -140,6 +140,20 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
+    bot.action(/^odel_confirm_([\w-]+)$/, isMasterAdmin, async (ctx) => {
+        const orderId = ctx.match[1];
+        try {
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (order) await orderHelper.clearOldNotifications(ctx, order);
+            await orderRepo.deleteOrder(orderId);
+            ctx.answerCbQuery('🗑 Gelöscht!').catch(() => {});
+            await ctx.editMessageText(`🗑 Bestellung \`#${orderId}\` wurde endgültig gelöscht.`, { parse_mode: 'Markdown' });
+        } catch (error) {
+            console.error(error.message);
+            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
+        }
+    });
+
     bot.action(/^odel_approve_([\w-]+)$/, isMasterAdmin, async (ctx) => {
         try {
             const approval = await approvalRepo.getApprovalById(ctx.match[1]);

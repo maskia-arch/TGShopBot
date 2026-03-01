@@ -4,9 +4,7 @@ const formatters = require('./formatters');
 
 async function clearOldNotifications(ctx, order) {
     if (!order || !order.notification_msg_ids || order.notification_msg_ids.length === 0) return;
-    
     const currentMsgId = ctx.callbackQuery?.message?.message_id;
-    
     for (const msg of order.notification_msg_ids) {
         try {
             if (currentMsgId && msg.message_id === currentMsgId) continue;
@@ -51,12 +49,12 @@ async function buildOrderViewPayload(order) {
     keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
 
     if (method === 'none' || !method) {
-        keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odelivery_${order.order_id}` }]);
+        keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odeliv_${order.order_id}` }]);
     }
 
     keyboard.inline_keyboard.push(
         [
-            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_in_bearbeitung` },
+            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_processing` }, // Geändert zu 'processing'
             { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
         ],
         [
