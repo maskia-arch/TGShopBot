@@ -4,6 +4,7 @@ const productRepo = require('../../database/repositories/productRepo');
 const uiHelper = require('../../utils/uiHelper');
 const notificationService = require('../../services/notificationService');
 const texts = require('../../utils/texts');
+const config = require('../../config');
 
 const cleanup = async (ctx) => {
     if (ctx.wizard.state.messagesToDelete) {
@@ -79,6 +80,22 @@ const editPriceScene = new Scenes.WizardScene(
         try {
             const productId = ctx.wizard.state.productId;
             const formattedPrice = newPrice.toFixed(2);
+            const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
+
+            if (isMaster) {
+                if (typeof productRepo.updateProductPrice === 'function') {
+                    await productRepo.updateProductPrice(productId, newPrice);
+                } else if (typeof productRepo.updateProduct === 'function') {
+                    await productRepo.updateProduct(productId, { price: newPrice });
+                } else {
+                    const supabase = require('../../database/supabaseClient');
+                    await supabase.from('products').update({ price: newPrice }).eq('id', productId);
+                }
+
+                await cleanup(ctx);
+                await ctx.reply(`✅ Preis für "${ctx.wizard.state.productName}" wurde sofort auf ${formattedPrice}€ geändert.`);
+                return backToProduct(ctx);
+            }
             
             const approval = await approvalRepo.createApprovalRequest(
                 'PRICE_CHANGE', 

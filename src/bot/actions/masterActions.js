@@ -122,19 +122,58 @@ module.exports = (bot) => {
         try {
             const pending = await approvalRepo.getPendingApprovals();
             if (pending.length === 0) return uiHelper.updateOrSend(ctx, '✅ Keine ausstehenden Freigaben.', { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] });
-            const keyboard = pending.map(p => ([{ text: `${p.action_type === 'DELETE' ? '🗑' : '💰'} ID:${p.target_id}`, callback_data: `master_view_appr_${p.id}` }]));
+            const keyboard = pending.map(p => {
+                const icon = p.action_type === 'DELETE' ? '🗑' : '💰';
+                return [{ text: `${icon} Anfrage prüfen`, callback_data: `master_view_appr_${p.id}` }];
+            });
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_panel' }]);
             await uiHelper.updateOrSend(ctx, '📋 *Ausstehende Anfragen:*', { inline_keyboard: keyboard });
+        } catch (error) { console.error(error.message); }
+    });
+
+    bot.action(/^master_view_appr_(.+)$/, isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const request = await approvalRepo.getApprovalById(ctx.match[1]);
+            if (!request) return ctx.answerCbQuery('Anfrage nicht gefunden.', { show_alert: true });
+            
+            let text = `📋 *Anfrage Details*\n\n`;
+            text += `Typ: ${request.action_type === 'DELETE' ? '🗑 Löschen' : '💰 Preisänderung'}\n`;
+            text += `Angefragt von: ${request.requested_by}\n`;
+            if (request.action_type === 'PRICE_CHANGE') {
+                text += `Neuer Preis: ${request.new_value}€\n`;
+            }
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '✅ Genehmigen', callback_data: `master_approve_${request.id}` }],
+                    [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${request.id}` }],
+                    [{ text: '🔙 Zurück', callback_data: 'master_pending_approvals' }]
+                ]
+            };
+            await uiHelper.updateOrSend(ctx, text, keyboard);
         } catch (error) { console.error(error.message); }
     });
 
     bot.action(/^master_approve_(.+)$/, isMasterAdmin, async (ctx) => {
         try {
             const request = await approvalRepo.getApprovalById(ctx.match[1]);
-            if (request.action_type === 'PRICE_CHANGE') await productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value));
-            else if (request.action_type === 'DELETE') await productRepo.deleteProduct(request.target_id);
+            if (request.action_type === 'PRICE_CHANGE') {
+                await productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value));
+            } else if (request.action_type === 'DELETE') {
+                await productRepo.deleteProduct(request.target_id);
+            }
             await approvalRepo.updateApprovalStatus(request.id, 'approved');
             ctx.answerCbQuery('✅ Genehmigt!').catch(() => {});
+            ctx.update.callback_query.data = 'master_pending_approvals';
+            return bot.handleUpdate(ctx.update);
+        } catch (error) { console.error(error.message); }
+    });
+
+    bot.action(/^master_reject_appr_(.+)$/, isMasterAdmin, async (ctx) => {
+        try {
+            await approvalRepo.updateApprovalStatus(ctx.match[1], 'rejected');
+            ctx.answerCbQuery('❌ Abgelehnt.').catch(() => {});
             ctx.update.callback_query.data = 'master_pending_approvals';
             return bot.handleUpdate(ctx.update);
         } catch (error) { console.error(error.message); }

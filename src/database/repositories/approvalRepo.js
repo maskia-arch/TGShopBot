@@ -1,8 +1,6 @@
 const supabase = require('../supabaseClient');
 
-const createApprovalRequest = async (actionType, requestedBy, targetId, newValue = null) => {
-    // Wir nutzen .select('id'), um nicht das ganze Objekt zurückzugeben, 
-    // da wir meist nur die ID für die Bestätigung brauchen.
+const createApproval = async (targetId, actionType, newValue = null, requestedBy = null) => {
     const { data, error } = await supabase
         .from('pending_approvals')
         .insert([{
@@ -19,18 +17,17 @@ const createApprovalRequest = async (actionType, requestedBy, targetId, newValue
 };
 
 const getPendingApprovals = async () => {
-    // Reduzierung der geladenen Spalten beschleunigt die Antwortzeit von Supabase
     const { data, error } = await supabase
         .from('pending_approvals')
         .select(`
             id,
             action_type,
             target_id,
-            requested_by,
-            users:requested_by (username)
+            new_value,
+            requested_by
         `)
         .eq('status', 'pending')
-        .order('created_at', { ascending: false }); // Neueste Anfragen zuerst
+        .order('created_at', { ascending: false });
 
     if (error) throw new Error(error.message);
     return data;
@@ -44,8 +41,7 @@ const getApprovalById = async (id) => {
             action_type,
             target_id,
             new_value,
-            requested_by,
-            users:requested_by (username)
+            requested_by
         `)
         .eq('id', id)
         .single();
@@ -66,7 +62,7 @@ const updateApprovalStatus = async (id, status) => {
 };
 
 module.exports = {
-    createApprovalRequest,
+    createApproval,
     getPendingApprovals,
     getApprovalById,
     updateApprovalStatus
