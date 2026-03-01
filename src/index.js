@@ -34,13 +34,15 @@ const cronService = require('./services/cronService');
 
 const { checkBan } = require('./bot/middlewares/auth');
 
+// ── RENDER HEALTH CHECK SERVER ──
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Shop Bot is alive!');
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
+// WICHTIG: '0.0.0.0' zwingt den Server, für Render sichtbar zu sein!
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`Health-check server listening on port ${PORT}`);
 });
 
