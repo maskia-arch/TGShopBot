@@ -19,7 +19,7 @@ const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
             user_id: userId,
             order_id: customId,
             total_amount: totalAmount,
-            details: orderDetails,
+            details: orderDetails, 
             status: 'offen',
             shipping_link: shippingLink || null,
             payment_method_name: paymentMethodName || 'Nicht angegeben',

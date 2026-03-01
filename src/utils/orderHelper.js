@@ -41,7 +41,8 @@ async function buildOrderViewPayload(order) {
     if (order.details && order.details.length > 0) {
         text += `\n\n*Artikel:*`;
         order.details.forEach(item => {
-            text += `\n▪️ ${item.quantity}x ${item.name} = ${formatters.formatPrice(item.total)}`;
+            const path = item.category_path ? `_${item.category_path}_ » ` : '';
+            text += `\n▪️ ${item.quantity}x ${path}${item.name} = ${formatters.formatPrice(item.total)}`;
         });
     }
 
@@ -54,7 +55,7 @@ async function buildOrderViewPayload(order) {
 
     keyboard.inline_keyboard.push(
         [
-            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_processing` }, // Geändert zu 'processing'
+            { text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_processing` },
             { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }
         ],
         [
