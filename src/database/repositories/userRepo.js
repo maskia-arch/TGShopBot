@@ -59,7 +59,6 @@ const getPendingBan = async (banId) => {
     if (error) throw error;
     return data;
 };
-
 const revertBan = async (banId) => {
     const ban = await getPendingBan(banId);
     if (!ban) return null;
@@ -129,7 +128,11 @@ const getAllAdmins = async () => {
     const { data, error } = await supabase.from('users').select('telegram_id, username, role').eq('role', 'admin');
     if (error) throw error;
     const admins = data || [];
-    admins.unshift({ telegram_id: config.MASTER_ADMIN_ID, username: 'Master (System)', role: 'master' });
+    // Fix: Sicherstellen, dass die Master ID als Nummer behandelt wird
+    const masterId = Number(config.MASTER_ADMIN_ID);
+    if (!admins.find(a => Number(a.telegram_id) === masterId)) {
+        admins.unshift({ telegram_id: masterId, username: 'Master', role: 'master' });
+    }
     return admins;
 };
 

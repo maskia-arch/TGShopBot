@@ -71,16 +71,18 @@ module.exports = (bot) => {
             reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
         });
     });
-
     bot.action(/^cust_ping_(.+)$/, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const userId = ctx.from.id;
             const canPing = await userRepo.canPing(userId);
             if (!canPing) return ctx.answerCbQuery(texts.getPingCooldown().replace('⏰ ', ''), { show_alert: true });
+            
             await userRepo.setPingTimestamp(userId);
             const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
-            notificationService.notifyAdminsPing({ userId, username, orderId }).catch(() => {});
+            
+            notificationService.notifyAdminsPing({ userId, username, orderId }).catch(e => console.error('NotifyPing fail:', e));
+            
             ctx.answerCbQuery('✅ Ping gesendet!').catch(() => {});
             await ctx.reply(texts.getPingSent(), {
                 parse_mode: 'Markdown',
@@ -88,7 +90,7 @@ module.exports = (bot) => {
             });
         } catch (error) {
             console.error('Ping Error:', error.message);
-            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
+            ctx.answerCbQuery('⚠️ Dienst momentan nicht erreichbar.', { show_alert: true }).catch(() => {});
         }
     });
 
@@ -101,18 +103,15 @@ module.exports = (bot) => {
             await ctx.scene.enter('contactScene', { orderId });
         } catch (error) {
             console.error('Contact Error:', error.message);
-            ctx.answerCbQuery('Fehler.', { show_alert: true }).catch(() => {});
+            ctx.answerCbQuery('⚠️ Fehler beim Starten des Kontakts.', { show_alert: true }).catch(() => {});
         }
     });
 
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.message || !ctx.message.text) return next();
         const input = ctx.message.text.trim();
-        
         if (input.startsWith('/')) {
-            if (ctx.session && ctx.session.awaitingTxId) {
-                ctx.session.awaitingTxId = null;
-            }
+            ctx.session.awaitingTxId = null;
             return next();
         }
 
@@ -132,16 +131,14 @@ module.exports = (bot) => {
                     orderId, userId: ctx.from.id, username,
                     total: formatters.formatPrice(updated.total_amount || 0),
                     paymentName: updated.payment_method_name || 'N/A',
-                    txId: input,
-                    deliveryMethod: updated.delivery_method
-                }).catch(() => {});
+                    txId: input
+                }).catch(e => console.error('NotifyTxId fail:', e));
             } catch (error) {
                 console.error('TX-ID Save Error:', error.message);
                 ctx.reply('❌ Fehler beim Speichern.');
             }
             return;
         }
-
         return next();
     });
 };

@@ -17,7 +17,8 @@ const contactScene = new Scenes.WizardScene(
     'contactScene',
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
-        ctx.wizard.state.orderId = ctx.scene.state.orderId;
+        // Sicherstellen, dass die orderId korrekt aus dem State übernommen wird
+        ctx.wizard.state.orderId = (ctx.scene.state && ctx.scene.state.orderId) ? ctx.scene.state.orderId : 'Allgemein';
 
         const msg = await ctx.reply(texts.getContactPrompt(), {
             parse_mode: 'Markdown',
@@ -49,16 +50,24 @@ const contactScene = new Scenes.WizardScene(
 
         try {
             const userId = ctx.from.id;
-            await userRepo.setContactTimestamp(userId);
-
             const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
 
-            notificationService.notifyAdminsContact({
-                userId,
-                username,
-                orderId: ctx.wizard.state.orderId,
-                message: input
-            }).catch(() => {});
+            // Benachrichtigung abfeuern
+            if (notificationService.notifyAdminsContact) {
+                await notificationService.notifyAdminsContact({
+                    userId,
+                    username,
+                    orderId: ctx.wizard.state.orderId,
+                    message: input
+                });
+            } else {
+                // Fallback falls die spezifische Funktion fehlt
+                await notificationService.sendTo(require('../../config').MASTER_ADMIN_ID, 
+                    `💬 *Neue Kontaktanfrage*\nVon: ${username}\nID: ${userId}\nOrder: ${ctx.wizard.state.orderId}\n\nNachricht: ${input}`);
+            }
+
+            // Timestamp erst nach Erfolg setzen
+            await userRepo.setContactTimestamp(userId);
 
             await cleanup(ctx);
             await ctx.reply(texts.getContactSent(), { parse_mode: 'Markdown' });
