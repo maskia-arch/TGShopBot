@@ -101,6 +101,19 @@ module.exports = {
         return map[status] || status;
     },
 
+    // GEFIXT: Diese Funktion hat gefehlt!
+    getCustomerStatusLabel: (status) => {
+        const map = {
+            'offen': '📬 Offen – Zahlung ausstehend',
+            'bezahlt_pending': '⏳ Pending – Zahlung wird geprüft',
+            'in_bearbeitung': '⚙️ In Bearbeitung',
+            'versand': '📦 Versendet',
+            'abgeschlossen': '✅ Abgeschlossen',
+            'abgebrochen': '❌ Abgebrochen'
+        };
+        return map[status] || status;
+    },
+
     getDeliveryLabel: (option) => {
         const map = { 'none': '📱 Digital/Kein Versand', 'shipping': '🚚 Versand', 'pickup': '🏪 Abholung', 'both': '🚚🏪 Versand & Abholung' };
         return map[option] || option;
