@@ -64,6 +64,7 @@ module.exports = {
     getSubcategoryCreated: (name, catName) => `✅ Unterkategorie "${name}" in *${catName}* erstellt!`,
     getPaymentSaved: (name, addr) => `✅ Zahlungsart gespeichert:\n\n*Name:* ${name}\n*Adresse:* ${addr || 'Keine'}\n\nDiese wird Kunden nun beim Checkout angezeigt.`,
     getGeneralError: () => `❌ Hoppla! Ein Fehler ist aufgetreten. Bitte versuche es später erneut.`,
+    
     getCustomerInvoice: (data) => {
         let text = `🧾 *Rechnung / Bestellbestätigung*\n\n`;
         text += `📋 *Order-ID:* \`#${data.orderId}\`\n`;
@@ -101,7 +102,6 @@ module.exports = {
         return map[status] || status;
     },
 
-    // GEFIXT: Diese Funktion hat gefehlt!
     getCustomerStatusLabel: (status) => {
         const map = {
             'offen': '📬 Offen – Zahlung ausstehend',
@@ -156,5 +156,8 @@ module.exports = {
         `➖➖➖➖➖➖➖➖➖➖\n` +
         `${content}\n` +
         `➖➖➖➖➖➖➖➖➖➖\n\n` +
-        `Vielen Dank für deinen Einkauf!`
+        `Vielen Dank für deinen Einkauf!`,
+
+    getDigitalDeliverySuccess: (orderId) => 
+        `✅ *Digital versendet!*\n\nDie Lieferung für \`#${orderId}\` wurde erfolgreich an den Kunden geschickt.\nDer Status wurde automatisch auf "Abgeschlossen" gesetzt.`
 };
