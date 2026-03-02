@@ -4,6 +4,7 @@ const userRepo = require('../../database/repositories/userRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const orderHelper = require('../../utils/orderHelper'); 
+const uiHelper = require('../../utils/uiHelper'); // GEFIXT: Fehlender Import hinzugefügt!
 const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
@@ -110,7 +111,8 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    bot.action(/^ostatus_(.+)_(.+)$/, isAdmin, async (ctx) => {
+    // GEFIXT: Regex so angepasst, dass er nicht mehr beim Unterstrich von "in_bearbeitung" stolpert
+    bot.action(/^ostatus_([^_]+)_(.+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             let newStatus = ctx.match[2];
