@@ -9,16 +9,13 @@ const init = (bot) => {
     botInstance = bot;
 };
 
-// KUGELSICHERES SENDEN INKLUSIVE FALLBACK
 const sendTo = async (chatId, text, options = {}) => {
     if (!botInstance) throw new Error('NotificationService not initialized');
     try {
-        // Erster Versuch: Schön formatiert mit Markdown
         return await botInstance.telegram.sendMessage(chatId, text, { parse_mode: 'Markdown', ...options });
     } catch (e) {
         console.warn(`[Bot] Markdown Error für Chat ${chatId} (${e.message}). Versuche sicheren Fallback...`);
         try {
-            // Zweiter Versuch (Fallback): Wenn Markdown crasht, sende es als reinen Text!
             const fallbackOptions = { ...options };
             delete fallbackOptions.parse_mode; 
             return await botInstance.telegram.sendMessage(chatId, text, fallbackOptions);
@@ -29,7 +26,6 @@ const sendTo = async (chatId, text, options = {}) => {
     }
 };
 
-// KUGELSICHERES EDITIEREN INKLUSIVE FALLBACK
 const editAdminMessage = async (chatId, messageId, text, options = {}) => {
     if (!botInstance) return null;
     try {
@@ -226,9 +222,29 @@ const notifyAdminNewFeedback = async (data) => {
     } catch (error) { console.error(error.message); }
 };
 
+const notifyAdminOrderDeleteRequest = async (data) => {
+    try {
+        const text = texts.getAdminOrderDeleteRequest(data);
+        const keyboard = { inline_keyboard: [
+            [{ text: '✅ Löschung zustimmen', callback_data: `cust_del_approve_${data.orderId}` }],
+            [{ text: '❌ Ablehnen & Wiederherstellen', callback_data: `cust_del_reject_${data.orderId}` }],
+            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
+            [{ text: '📋 Bestellung prüfen', callback_data: `oview_${data.orderId}` }]
+        ]};
+        const admins = await userRepo.getAllAdmins();
+        const targetIds = new Set(admins.map(a => String(a.telegram_id)));
+        targetIds.add(String(config.MASTER_ADMIN_ID));
+        
+        for (const id of targetIds) {
+            sendTo(id, text, { reply_markup: keyboard });
+        }
+    } catch (error) { console.error('Notify Order Delete Request Error:', error.message); }
+};
+
 module.exports = {
     init, sendTo, editAdminMessage, sendOrderReceipt, notifyCustomerStatusUpdate,
     notifyAdminsInterest, notifyAdminsNewOrder, notifyAdminsTxId, 
     notifyAdminsPing, notifyAdminsContact, notifyMasterBan, sendBroadcast,
-    notifyCustomerFeedbackInvite, notifyAdminNewFeedback
+    notifyCustomerFeedbackInvite, notifyAdminNewFeedback,
+    notifyAdminOrderDeleteRequest
 };

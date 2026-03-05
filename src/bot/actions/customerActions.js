@@ -37,6 +37,11 @@ module.exports = (bot) => {
                     keyboard.push([{ text: `💸 Zahlen: ${order.order_id}`, callback_data: `confirm_pay_${order.order_id}` }]);
                 }
 
+                // NEU: Löschen-Button für abgeschlossene Bestellungen
+                if (order.status === 'abgeschlossen') {
+                    keyboard.push([{ text: `🗑 Löschen: ${order.order_id}`, callback_data: `cust_del_order_${order.order_id}` }]);
+                }
+
                 keyboard.push([
                     { text: `🔔 Ping: ${order.order_id}`, callback_data: `cust_ping_${order.order_id}` },
                     { text: `💬 Kontakt`, callback_data: `cust_contact_${order.order_id}` }
@@ -49,6 +54,37 @@ module.exports = (bot) => {
             });
         } catch (error) {
             console.error('My Orders Error:', error.message);
+        }
+    });
+
+    // NEU: Handler für den Löschen-Button des Kunden
+    bot.action(/^cust_del_order_(.+)$/, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            
+            // Status auf "Löschung angefragt" setzen, damit sie beim Kunden direkt verschwindet
+            await orderRepo.updateOrderStatus(orderId, 'loeschung_angefragt');
+            
+            const username = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || 'Kunde');
+            
+            // Benachrichtigung an Admin senden (bauen wir im nächsten Schritt)
+            if (notificationService.notifyAdminOrderDeleteRequest) {
+                notificationService.notifyAdminOrderDeleteRequest({
+                    orderId,
+                    userId: ctx.from.id,
+                    username
+                }).catch(e => console.error('NotifyDeleteRequest fail:', e));
+            }
+
+            ctx.answerCbQuery('🗑 Bestellung aus der Übersicht entfernt.').catch(() => {});
+            await ctx.reply('ℹ️ Deine Bestellung wurde aus deiner Übersicht entfernt. Ein Admin wird die endgültige Löschung aus dem System prüfen.');
+
+            // Meine Bestellungen neu laden
+            ctx.update.callback_query.data = 'my_orders';
+            return bot.handleUpdate(ctx.update);
+        } catch (error) {
+            console.error('Customer Delete Order Error:', error.message);
+            ctx.answerCbQuery('⚠️ Fehler beim Ausblenden.', { show_alert: true }).catch(() => {});
         }
     });
 
@@ -109,7 +145,6 @@ module.exports = (bot) => {
         }
     });
 
-    // UPDATE: Feedbacks seitenweise anzeigen mit Sterne-Durchschnitt!
     bot.action(/^view_feedbacks(?:_(\d+))?$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -126,7 +161,6 @@ module.exports = (bot) => {
             if (!feedbacks || feedbacks.length === 0) {
                 text = texts.getPublicFeedbacksEmpty();
             } else {
-                // Übergeben der Stats an die Text-Funktion (passen wir gleich an!)
                 text = texts.getPublicFeedbacksHeader(stats.average, stats.total);
                 feedbacks.forEach(fb => {
                     const stars = '⭐'.repeat(fb.rating);
@@ -136,7 +170,6 @@ module.exports = (bot) => {
                     text += `\n`;
                 });
 
-                // Paginierung (Blättern) aufbauen
                 const totalPages = Math.ceil(totalFeedbacks / limit);
                 if (totalPages > 1) {
                     const navRow = [];
@@ -162,7 +195,6 @@ module.exports = (bot) => {
         }
     });
 
-    // Dummy-Handler für die "Seite X von Y" Anzeige (damit der Bot nicht abstürzt, wenn man draufklickt)
     bot.action('ignore_click', (ctx) => ctx.answerCbQuery().catch(() => {}));
 
     bot.action(/^start_feedback_(.+)$/, async (ctx) => {

@@ -64,6 +64,7 @@ module.exports = {
     getSubcategoryCreated: (name, catName) => `✅ Unterkategorie "${name}" in *${catName}* erstellt!`,
     getPaymentSaved: (name, addr) => `✅ Zahlungsart gespeichert:\n\n*Name:* ${name}\n*Adresse:* ${addr || 'Keine'}\n\nDiese wird Kunden nun beim Checkout angezeigt.`,
     getGeneralError: () => `❌ Hoppla! Ein Fehler ist aufgetreten. Bitte versuche es später erneut.`,
+    
     getCustomerInvoice: (data) => {
         let text = `🧾 *Rechnung / Bestellbestätigung*\n\n`;
         text += `📋 *Order-ID:* \`#${data.orderId}\`\n`;
@@ -96,7 +97,8 @@ module.exports = {
             'in_bearbeitung': '⚙️ In Bearbeitung',
             'versand': '📦 Versendet',
             'abgeschlossen': '✅ Abgeschlossen',
-            'abgebrochen': '❌ Abgebrochen'
+            'abgebrochen': '❌ Abgebrochen',
+            'loeschung_angefragt': '🗑 Löschung angefragt' // NEU
         };
         return map[status] || status;
     },
@@ -108,7 +110,8 @@ module.exports = {
             'in_bearbeitung': '⚙️ In Bearbeitung',
             'versand': '📦 Versendet',
             'abgeschlossen': '✅ Abgeschlossen',
-            'abgebrochen': '❌ Abgebrochen'
+            'abgebrochen': '❌ Abgebrochen',
+            'loeschung_angefragt': '🗑 Wird geprüft' // NEU
         };
         return map[status] || status;
     },
@@ -147,6 +150,7 @@ module.exports = {
     getPingCooldown: () => `⏰ Du kannst nur einmal pro 24 Stunden einen Ping senden.`,
     getContactSent: () => `✅ *Kontaktanfrage gesendet!*\n\nEin Admin wird sich bei dir melden.`,
     getContactPrompt: () => `✍️ *Kontaktanfrage*\n\nBitte beschreibe kurz dein Anliegen (max. 500 Zeichen):`,
+    
     getAdminPingNotify: (data) =>
         `🔔 *KUNDEN-PING*\n\n👤 ${data.username}\n📋 /${data.orderId}\n\nDer Kunde wartet auf ein Update!`,
 
@@ -201,7 +205,6 @@ module.exports = {
     getPublicFeedbacksEmpty: () => 
         `⭐ *Kunden-Feedbacks*\n\nBisher wurden noch keine Feedbacks freigegeben. Werde der Erste!`,
 
-    // NEU: Master Menü Texte
     getMasterShopManagement: () => 
         `⚙️ *Shop Verwaltung*\n\nHier kannst du die administrativen Bereiche deines Shops, Zahlungsarten und dein Team verwalten.`,
     
@@ -209,5 +212,11 @@ module.exports = {
         `⭐ *Feedback Verwaltung*\n\n` +
         `📊 *Gesamtdurchschnitt:* ${average} / 5.0\n` +
         `📝 *Freigegebene Feedbacks:* ${total}\n\n` +
-        `Hier kannst du die öffentlichen Bewertungen einsehen oder den Feedback-Verlauf komplett zurücksetzen.`
+        `Hier kannst du die öffentlichen Bewertungen einsehen oder den Feedback-Verlauf komplett zurücksetzen.`,
+
+    getAdminOrderDeleteRequest: (data) => 
+        `🗑 *LÖSCHANFRAGE VOM KUNDEN*\n\n` +
+        `👤 Kunde: ${data.username} (ID: ${data.userId})\n` +
+        `📋 Order: \`#${data.orderId}\`\n\n` +
+        `Der Kunde möchte diese abgeschlossene Bestellung aus dem System löschen. Bitte prüfen und entscheiden.`
 };

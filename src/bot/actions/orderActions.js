@@ -1,19 +1,20 @@
 const orderRepo = require('../../database/repositories/orderRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const userRepo = require('../../database/repositories/userRepo');
-const feedbackRepo = require('../../database/repositories/feedbackRepo'); // NEUER IMPORT FÜR FEEDBACKS
+const feedbackRepo = require('../../database/repositories/feedbackRepo'); 
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const orderHelper = require('../../utils/orderHelper'); 
 const uiHelper = require('../../utils/uiHelper');
-const { isAdmin, isMasterAdmin } = require('../middlewares/auth');
+const { isAdmin } = require('../middlewares/auth');
 const config = require('../../config');
 const notificationService = require('../../services/notificationService');
 
-const FINAL_STATUSES = ['abgeschlossen', 'abgebrochen'];
+const FINAL_STATUSES = ['abgeschlossen', 'abgebrochen', 'loeschung_angefragt']; // UPDATE: 'loeschung_angefragt' hinzugefügt
 
 module.exports = (bot) => {
 
+    // (Die "my_orders" Funktion lassen wir hier zur Sicherheit drin, auch wenn sie primär in der customerActions.js wohnt)
     bot.action('my_orders', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -76,6 +77,7 @@ module.exports = (bot) => {
     bot.action('admin_open_orders', isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
+            // Holt jetzt nur die offenen Bestellungen via orderRepo.getOpenOrders
             const orders = await orderRepo.getOpenOrders(20);
             let text = '';
             const keyboard = [];
@@ -204,7 +206,32 @@ module.exports = (bot) => {
         } catch (error) { console.error(error.message); }
     });
 
-    // NEU: Feedback-Qualifizierung abfangen
+    // ==========================================
+    // NEU: LÖSCH-ANFRAGE VOM KUNDEN (Admin-Prüfung)
+    // ==========================================
+    bot.action(/^cust_del_approve_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            await orderRepo.deleteOrder(orderId);
+            ctx.answerCbQuery('✅ Löschung bestätigt.').catch(() => {});
+            if (ctx.callbackQuery.message) {
+                await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n*STATUS: Gelöscht ✅*', { parse_mode: 'Markdown' });
+            }
+        } catch (error) { console.error('Approve Customer Delete Error:', error.message); }
+    });
+
+    bot.action(/^cust_del_reject_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            // Wenn der Admin ablehnt, wird die Bestellung wieder "abgeschlossen" und taucht beim Kunden wieder auf
+            await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+            ctx.answerCbQuery('❌ Löschung abgelehnt.').catch(() => {});
+            if (ctx.callbackQuery.message) {
+                await ctx.editMessageText(ctx.callbackQuery.message.text + '\n\n*STATUS: Abgelehnt ❌ (Wieder beim Kunden sichtbar)*', { parse_mode: 'Markdown' });
+            }
+        } catch (error) { console.error('Reject Customer Delete Error:', error.message); }
+    });
+
     bot.action(/^allow_fb_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
@@ -213,15 +240,12 @@ module.exports = (bot) => {
             if (!order) return ctx.answerCbQuery('Bestellung nicht gefunden.', { show_alert: true });
             if (order.feedback_invited) return ctx.answerCbQuery('Bereits für Feedback qualifiziert.', { show_alert: true });
 
-            // In DB als "eingeladen" markieren
             await orderRepo.setFeedbackInvited(orderId, true);
 
-            // Kunde benachrichtigen
             if (notificationService.notifyCustomerFeedbackInvite) {
                 await notificationService.notifyCustomerFeedbackInvite(order.user_id, orderId);
             }
 
-            // Ansicht aktualisieren
             order.feedback_invited = true;
             const payload = await orderHelper.buildOrderViewPayload(order);
             await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
@@ -233,7 +257,6 @@ module.exports = (bot) => {
         }
     });
 
-    // NEU: Feedback Freigeben / Ablehnen
     bot.action(/^fb_approve_(.+)$/, isAdmin, async (ctx) => {
         try {
             const feedbackId = ctx.match[1];

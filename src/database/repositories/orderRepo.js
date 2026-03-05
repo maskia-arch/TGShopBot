@@ -120,7 +120,7 @@ const getActiveOrdersByUser = async (userId) => {
         .from('orders')
         .select(SELECT_FULL)
         .eq('user_id', userId)
-        .in('status', ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand'])
+        .in('status', ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand', 'abgeschlossen'])
         .order('created_at', { ascending: false });
     if (error) throw error;
     return data || [];
@@ -136,7 +136,7 @@ const getOpenOrders = async (limit = 20) => {
     const { data, error } = await supabase
         .from('orders')
         .select(SELECT_FULL)
-        .in('status', ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand'])
+        .in('status', ['offen', 'bezahlt_pending', 'in_bearbeitung', 'versand', 'loeschung_angefragt'])
         .order('created_at', { ascending: false })
         .limit(limit);
     if (error) throw error;
