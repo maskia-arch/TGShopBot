@@ -139,6 +139,16 @@ const deleteProduct = async (id) => {
     return true;
 };
 
+const updateProductPrice = async (productId, price) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ price: price })
+        .eq('id', productId)
+        .select('id, price');
+    if (error) throw error;
+    return data[0];
+};
+
 const setDeliveryOption = async (productId, option) => {
     const { data, error } = await supabase.from('products').update({ delivery_option: option }).eq('id', productId).select('id, delivery_option');
     if (error) throw error;
@@ -149,6 +159,6 @@ module.exports = {
     getActiveCategories, addCategory, renameCategory, deleteCategory,
     updateCategorySortOrder, getProductsByCategory, getProductsBySubcategory,
     getProductById, addProduct, deleteProduct,
-    toggleProductStatus, updateProductCategory, updateProductImage,
+    toggleProductStatus, updateProductCategory, updateProductImage, updateProductPrice,
     updateProductName, updateProductSortOrder, setDeliveryOption
 };

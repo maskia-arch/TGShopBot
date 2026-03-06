@@ -214,6 +214,20 @@ module.exports = (bot) => {
         } catch (error) { console.error('Reject FB Error:', error.message); }
     });
 
+    // ─── NOTIZ BUTTON (fehlte bisher!) ──────────────────────────────────────
+    bot.action(/^onote_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingNote = orderId;
+            await ctx.reply(`📝 *Notiz für #${orderId}*\n\nBitte sende jetzt den Notiztext:`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: `oview_${orderId}` }]] }
+            });
+        } catch (error) { console.error('onote_ error:', error.message); }
+    });
+
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.message.text) return next();
         const input = ctx.message.text.trim();

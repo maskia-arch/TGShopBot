@@ -28,11 +28,12 @@ const editPriceScene = new Scenes.WizardScene(
         ctx.wizard.state.messagesToDelete = [];
         const productId = ctx.wizard.state.productId || ctx.scene.state.productId;
         const product = await productRepo.getProductById(productId);
-        
+
         ctx.wizard.state.productId = productId;
         ctx.wizard.state.productName = product.name;
-        ctx.wizard.state.lastQuestion = `💰 *Preisänderung*\n\nProdukt: "${product.name}"\nAktuell: ${product.price.toFixed(2)}€\n\nBitte sende mir den neuen Preis:`;
-        
+        ctx.wizard.state.currentPrice = product.price;
+        ctx.wizard.state.lastQuestion = `💰 *Preisänderung*\n\nProdukt: *${product.name}*\nAktuell: ${product.price.toFixed(2)}€\n\nBitte sende mir den neuen Preis:`;
+
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
@@ -40,22 +41,21 @@ const editPriceScene = new Scenes.WizardScene(
             }
         });
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
-        
         return ctx.wizard.next();
     },
     async (ctx) => {
         if (ctx.callbackQuery && ctx.callbackQuery.data === 'cancel_scene') {
-            await ctx.answerCbQuery('Abgebrochen');
+            await ctx.answerCbQuery('Abgebrochen').catch(() => {});
             return backToProduct(ctx);
         }
 
         if (!ctx.message || !ctx.message.text) return;
-        
+
         const input = ctx.message.text.trim();
         ctx.wizard.state.messagesToDelete.push(ctx.message.message_id);
 
         if (input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(ctx.wizard.state.lastQuestion, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
@@ -66,9 +66,8 @@ const editPriceScene = new Scenes.WizardScene(
         }
 
         const newPrice = parseFloat(input.replace(',', '.'));
-
         if (isNaN(newPrice) || newPrice <= 0) {
-            const errorMsg = await ctx.reply('⚠️ Bitte sende eine gültige Zahl (z.B. 12.99):', {
+            const errorMsg = await ctx.reply('⚠️ Ungültiger Preis. Bitte eine Zahl wie z.B. 12.99 eingeben:', {
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }
@@ -83,41 +82,34 @@ const editPriceScene = new Scenes.WizardScene(
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
 
             if (isMaster) {
-                if (typeof productRepo.updateProductPrice === 'function') {
-                    await productRepo.updateProductPrice(productId, newPrice);
-                } else if (typeof productRepo.updateProduct === 'function') {
-                    await productRepo.updateProduct(productId, { price: newPrice });
-                } else {
-                    const supabase = require('../../database/supabaseClient');
-                    await supabase.from('products').update({ price: newPrice }).eq('id', productId);
-                }
-
+                // Master ändert Preis sofort
+                await productRepo.updateProductPrice(productId, newPrice);
                 await cleanup(ctx);
-                await ctx.reply(`✅ Preis für "${ctx.wizard.state.productName}" wurde sofort auf ${formattedPrice}€ geändert.`);
+                await ctx.reply(`✅ Preis für *${ctx.wizard.state.productName}* wurde auf ${formattedPrice}€ geändert.`, { parse_mode: 'Markdown' });
                 return backToProduct(ctx);
             }
-            
-            const approval = await approvalRepo.createApprovalRequest(
-                'PRICE_CHANGE', 
-                ctx.from.id, 
-                productId, 
-                formattedPrice
-            );
 
-            if (notificationService.notifyMasterApproval) {
-                notificationService.notifyMasterApproval({
-                    approvalId: approval.id,
-                    actionType: 'PRICE_CHANGE',
-                    productId: productId,
-                    productName: ctx.wizard.state.productName,
-                    requestedBy: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
-                    newValue: formattedPrice
-                }).catch(() => {});
-            }
+            // Temporärer Admin → Anfrage an Master via approval
+            const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
+            const approval = await approvalRepo.createApproval(productId, 'PRICE_CHANGE', formattedPrice, adminName);
+
+            // Master benachrichtigen
+            const text = `💰 *PREISÄNDERUNGS-ANFRAGE*\n\n` +
+                `👤 Admin: ${adminName}\n` +
+                `📦 Produkt: *${ctx.wizard.state.productName}*\n` +
+                `💲 Aktuell: ${ctx.wizard.state.currentPrice?.toFixed(2) || '?'}€\n` +
+                `💲 Neu: ${formattedPrice}€\n\n` +
+                `Bitte Anfrage prüfen und genehmigen oder ablehnen.`;
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '✅ Genehmigen', callback_data: `master_approve_${approval.id}` }],
+                    [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${approval.id}` }]
+                ]
+            };
+            notificationService.sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});
 
             await cleanup(ctx);
-            await ctx.reply(`✅ Anfrage für "${ctx.wizard.state.productName}" (${formattedPrice}€) wurde an den Master gesendet.`);
-            
+            await ctx.reply(`📨 Anfrage für *${ctx.wizard.state.productName}* (${formattedPrice}€) wurde an den Master gesendet.`, { parse_mode: 'Markdown' });
             return backToProduct(ctx);
         } catch (error) {
             console.error('EditPrice Error:', error.message);
@@ -129,7 +121,7 @@ const editPriceScene = new Scenes.WizardScene(
 );
 
 editPriceScene.action('cancel_scene', async (ctx) => {
-    await ctx.answerCbQuery('Abgebrochen');
+    await ctx.answerCbQuery('Abgebrochen').catch(() => {});
     return backToProduct(ctx);
 });
 

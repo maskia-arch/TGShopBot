@@ -178,8 +178,13 @@ module.exports = (bot) => {
             if (!request) return ctx.answerCbQuery('Anfrage nicht gefunden.', { show_alert: true });
             
             let text = `📋 *Anfrage Details*\n\n`;
-            text += `Typ: ${request.action_type === 'DELETE' ? '🗑 Löschen' : '💰 Preisänderung'}\n`;
+            text += `Typ: ${request.action_type === 'DELETE' ? '🗑 Produkt löschen' : '💰 Preisänderung'}\n`;
             text += `Angefragt von: ${request.requested_by}\n`;
+            // Produktname laden wenn verfügbar
+            try {
+                const prod = await productRepo.getProductById(request.target_id);
+                if (prod) text += `Produkt: *${prod.name}*\n`;
+            } catch (e) {}
             if (request.action_type === 'PRICE_CHANGE') {
                 text += `Neuer Preis: ${request.new_value}€\n`;
             }
@@ -199,7 +204,7 @@ module.exports = (bot) => {
         try {
             const request = await approvalRepo.getApprovalById(ctx.match[1]);
             if (request.action_type === 'PRICE_CHANGE') {
-                await productRepo.toggleProductStatus(request.target_id, 'price', parseFloat(request.new_value));
+                await productRepo.updateProductPrice(request.target_id, parseFloat(request.new_value));
             } else if (request.action_type === 'DELETE') {
                 await productRepo.deleteProduct(request.target_id);
             }

@@ -1,5 +1,6 @@
 const { Scenes } = require('telegraf');
 const productRepo = require('../../database/repositories/productRepo');
+const { parseMedia } = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
@@ -23,7 +24,7 @@ const editProductImageScene = new Scenes.WizardScene(
     async (ctx) => {
         ctx.wizard.state.messagesToDelete = [];
         ctx.wizard.state.productId = ctx.scene.state.productId;
-        ctx.wizard.state.lastQuestion = '🖼 *Bild oder GIF ändern*\n\nBitte sende ein neues Foto, ein GIF oder ein kurzes Video.\nTippe "Löschen", um das Medium zu entfernen oder "Abbrechen".';
+        ctx.wizard.state.lastQuestion = '🖼 *Bild oder GIF ändern*\n\nBitte sende ein neues Foto, ein GIF oder ein kurzes Video.\nTippe \"Löschen\", um das Medium zu entfernen oder \"Abbrechen\".';
 
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
@@ -33,7 +34,7 @@ const editProductImageScene = new Scenes.WizardScene(
                 resize_keyboard: true
             }
         });
-        
+
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
         return ctx.wizard.next();
     },
@@ -49,7 +50,7 @@ const editProductImageScene = new Scenes.WizardScene(
         }
 
         if (input && input.startsWith('/')) {
-            const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
+            const warningMsg = await ctx.reply(ctx.wizard.state.lastQuestion, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     keyboard: [[{ text: 'Löschen' }, { text: 'Abbrechen' }]],
@@ -61,17 +62,21 @@ const editProductImageScene = new Scenes.WizardScene(
             return;
         }
 
+        // finalFileId wird MIT Typ-Präfix gespeichert
         let finalFileId = undefined;
 
-        if (ctx.message.photo) {
-            finalFileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+        if (ctx.message.photo && ctx.message.photo.length > 0) {
+            // Fotos: höchste Auflösung nehmen
+            const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            finalFileId = `photo:${fileId}`;
         } else if (ctx.message.animation) {
-            finalFileId = ctx.message.animation.file_id;
+            finalFileId = `animation:${ctx.message.animation.file_id}`;
         } else if (ctx.message.video) {
-            finalFileId = ctx.message.video.file_id;
+            finalFileId = `video:${ctx.message.video.file_id}`;
         } else if (input && input.toLowerCase() === 'löschen') {
-            finalFileId = null;
-        } else if (input && input.length > 20) {
+            finalFileId = null; // null = Bild entfernen
+        } else if (input && input.length > 20 && !input.includes(' ')) {
+            // Manuelle file_id oder URL (Legacy-Support)
             finalFileId = input;
         }
 
@@ -82,11 +87,11 @@ const editProductImageScene = new Scenes.WizardScene(
                 await ctx.reply('✅ Medium erfolgreich aktualisiert!', { reply_markup: { remove_keyboard: true } });
             } else {
                 await cleanup(ctx);
-                await ctx.reply('⚠️ Ungültiges Format. Bitte sende ein Bild oder ein GIF.', { reply_markup: { remove_keyboard: true } });
+                await ctx.reply('⚠️ Ungültiges Format. Bitte sende ein Bild, GIF oder Video.', { reply_markup: { remove_keyboard: true } });
             }
             return backToProduct(ctx);
         } catch (error) {
-            console.error('DB Update Error:', error.message);
+            console.error('DB Update Error (editProductImageScene):', error.message);
             await cleanup(ctx);
             await ctx.reply(texts.getGeneralError());
             return ctx.scene.leave();

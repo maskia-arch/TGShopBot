@@ -124,7 +124,11 @@ module.exports = {
         return map[option] || option;
     },
 
-    // --- v0.5.6: Einzel-Bestellübersicht & Tresor ---
+    // Allgemeine UI-Strings
+    getActionCanceled: () => 'Aktion abgebrochen.',
+    getNoteAdded: (orderId) => `✅ Notiz für \`#${orderId}\` gespeichert.`,
+
+        // --- v0.5.6: Einzel-Bestellübersicht & Tresor ---
     getCustomerOrderDetailHeader: (orderId) => `📋 *Bestellung #${orderId}*`,
     getTresorEmpty: () => `🔐 *Deliverables Tresor*\n\nFür diese Bestellung wurden noch keine digitalen Artikel geliefert.`,
     getReplaceRequestSent: (orderId) =>

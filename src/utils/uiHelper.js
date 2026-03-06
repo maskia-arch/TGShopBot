@@ -1,5 +1,60 @@
 const texts = require('./texts');
 
+/**
+ * Parst eine image_url und gibt { type, fileId } zurück.
+ * Format: "photo:FILE_ID", "animation:FILE_ID", "video:FILE_ID"
+ * Legacy (kein Präfix): wird als "photo" behandelt.
+ */
+const parseMedia = (imageUrl) => {
+    if (!imageUrl) return { type: null, fileId: null };
+    if (imageUrl.startsWith('photo:')) return { type: 'photo', fileId: imageUrl.slice(6) };
+    if (imageUrl.startsWith('animation:')) return { type: 'animation', fileId: imageUrl.slice(10) };
+    if (imageUrl.startsWith('video:')) return { type: 'video', fileId: imageUrl.slice(6) };
+    // Legacy: kein Präfix = Telegram file_id eines Fotos oder URL
+    return { type: 'photo', fileId: imageUrl };
+};
+
+/**
+ * Sendet ein Produkt-Medium (Foto/GIF/Video) korrekt basierend auf Typ.
+ * Löscht die vorherige Nachricht und sendet neu.
+ */
+const sendProductMedia = async (ctx, imageUrl, text, replyMarkup) => {
+    const options = { parse_mode: 'Markdown', reply_markup: replyMarkup };
+
+    if (ctx.callbackQuery?.message) {
+        await ctx.deleteMessage().catch(() => {});
+    }
+
+    if (!imageUrl) {
+        return await ctx.reply(text, options);
+    }
+
+    const { type, fileId } = parseMedia(imageUrl);
+
+    try {
+        if (type === 'animation') {
+            return await ctx.replyWithAnimation(fileId, { caption: text, ...options });
+        } else if (type === 'video') {
+            return await ctx.replyWithVideo(fileId, { caption: text, ...options });
+        } else {
+            // photo oder unbekannt
+            return await ctx.replyWithPhoto(fileId, { caption: text, ...options });
+        }
+    } catch (e1) {
+        // Fallback: probiere alle Medientypen durch
+        console.warn(`sendProductMedia: Typ "${type}" fehlgeschlagen für ${fileId}, probiere Fallbacks...`);
+        const fallbackMethods = ['replyWithPhoto', 'replyWithAnimation', 'replyWithVideo'];
+        for (const method of fallbackMethods) {
+            try {
+                return await ctx[method](fileId, { caption: text, ...options });
+            } catch (e) {}
+        }
+        // Absoluter Fallback: Text ohne Bild
+        console.error(`sendProductMedia: Alle Medientypen fehlgeschlagen für ${fileId}`);
+        return await ctx.reply(text + texts.getAdminImageLoadError(), options);
+    }
+};
+
 const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
     const options = {
         parse_mode: 'Markdown',
@@ -8,39 +63,38 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
 
     try {
         if (ctx.callbackQuery && ctx.callbackQuery.message) {
-            const isCurrentlyPhoto = ctx.callbackQuery.message.photo !== undefined;
+            const msg = ctx.callbackQuery.message;
+            const hasMedia = !!(msg.photo || msg.animation || msg.video);
 
             if (imageUrl) {
-                if (isCurrentlyPhoto) {
-                    return await ctx.editMessageMedia({
-                        type: 'photo', media: imageUrl, caption: text, parse_mode: 'Markdown'
-                    }, { reply_markup: replyMarkup });
-                } else {
-                    await ctx.deleteMessage().catch(() => {});
-                    return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
-                }
+                // Muss Medien senden – lösche alte Nachricht und sende neu
+                await ctx.deleteMessage().catch(() => {});
+                return await sendProductMedia(ctx, imageUrl, text, replyMarkup);
             } else {
-                if (isCurrentlyPhoto) {
+                if (hasMedia) {
+                    // Alte Nachricht hat Medien, neue nicht → löschen und Text senden
                     await ctx.deleteMessage().catch(() => {});
                     return await ctx.reply(text, options);
                 } else {
+                    // Normales Text-Edit
                     return await ctx.editMessageText(text, options);
                 }
             }
         } else {
             if (imageUrl) {
-                return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
+                return await sendProductMedia(ctx, imageUrl, text, replyMarkup);
             } else {
                 return await ctx.reply(text, options);
             }
         }
     } catch (error) {
+        // Fallback bei allem
         try {
-            if (ctx.callbackQuery && ctx.callbackQuery.message) {
+            if (ctx.callbackQuery?.message) {
                 await ctx.deleteMessage().catch(() => {});
             }
             if (imageUrl) {
-                return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
+                return await sendProductMedia(ctx, imageUrl, text, replyMarkup);
             }
             return await ctx.reply(text, options);
         } catch (fallbackError) {
@@ -61,33 +115,4 @@ const sendTemporary = async (ctx, text, seconds = 3) => {
     }
 };
 
-const sendProductMedia = async (ctx, imageUrl, text, replyMarkup) => {
-    const options = { parse_mode: 'Markdown', reply_markup: replyMarkup };
-    const hasMedia = ctx.callbackQuery?.message?.photo || ctx.callbackQuery?.message?.animation || ctx.callbackQuery?.message?.video;
-
-    if (imageUrl) {
-        if (ctx.callbackQuery?.message) await ctx.deleteMessage().catch(() => {});
-        try {
-            return await ctx.replyWithPhoto(imageUrl, { caption: text, ...options });
-        } catch (e1) {
-            try {
-                return await ctx.replyWithAnimation(imageUrl, { caption: text, ...options });
-            } catch (e2) {
-                try {
-                    return await ctx.replyWithVideo(imageUrl, { caption: text, ...options });
-                } catch (e3) {
-                    return await ctx.reply(text + texts.getAdminImageLoadError(), options);
-                }
-            }
-        }
-    } else {
-        if (hasMedia) {
-            if (ctx.callbackQuery?.message) await ctx.deleteMessage().catch(() => {});
-            return await ctx.reply(text, options);
-        } else {
-            return await updateOrSend(ctx, text, replyMarkup);
-        }
-    }
-};
-
-module.exports = { updateOrSend, sendTemporary, sendProductMedia };
+module.exports = { updateOrSend, sendTemporary, sendProductMedia, parseMedia };

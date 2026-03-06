@@ -257,6 +257,23 @@ const notifyAdminReplaceRequest = async (data) => {
     } catch (error) { console.error('notifyAdminReplaceRequest error:', error.message); }
 };
 
+const notifyMasterProductDeleteRequest = async (data) => {
+    try {
+        const text = `🗑 *LÖSCHANFRAGE – PRODUKT*\n\n` +
+            `👤 Admin: ${data.adminName}\n` +
+            `📦 Produkt: *${data.productName}*\n` +
+            `🆔 Produkt-ID: \`${data.productId}\`\n\n` +
+            `Soll dieses Produkt endgültig gelöscht werden?`;
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: '✅ Löschen genehmigen', callback_data: `master_approve_${data.approvalId}` }],
+                [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${data.approvalId}` }]
+            ]
+        };
+        await sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard });
+    } catch (error) { console.error('notifyMasterProductDeleteRequest error:', error.message); }
+};
+
 const notifyAdminsNewProduct = async (data) => {
     try {
         const admins = await userRepo.getAllAdmins();
@@ -274,5 +291,5 @@ module.exports = {
     notifyAdminsInterest, notifyAdminsNewOrder, notifyAdminsTxId, 
     notifyAdminsPing, notifyAdminsContact, notifyMasterBan, sendBroadcast,
     notifyCustomerFeedbackInvite, notifyAdminNewFeedback,
-    notifyAdminOrderDeleteRequest, notifyAdminReplaceRequest, notifyAdminsNewProduct
+    notifyAdminOrderDeleteRequest, notifyAdminReplaceRequest, notifyAdminsNewProduct, notifyMasterProductDeleteRequest
 };

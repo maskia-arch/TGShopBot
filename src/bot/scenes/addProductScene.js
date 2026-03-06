@@ -88,7 +88,7 @@ const addProductScene = new Scenes.WizardScene(
 
             if (data === 'cancel_add') {
                 ctx.answerCbQuery().catch(() => {});
-                await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+                await uiHelper.sendTemporary(ctx, 'Aktion abgebrochen.', 2);
                 return ctx.scene.leave();
             }
 
@@ -288,12 +288,12 @@ const addProductScene = new Scenes.WizardScene(
 
         if (ctx.wizard.state.step === 'image') {
             let fileId = null;
-            if (ctx.message?.photo) {
-                fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+            if (ctx.message?.photo && ctx.message.photo.length > 0) {
+                fileId = `photo:${ctx.message.photo[ctx.message.photo.length - 1].file_id}`;
             } else if (ctx.message?.animation) {
-                fileId = ctx.message.animation.file_id;
+                fileId = `animation:${ctx.message.animation.file_id}`;
             } else if (ctx.message?.video) {
-                fileId = ctx.message.video.file_id;
+                fileId = `video:${ctx.message.video.file_id}`;
             }
 
             if (fileId) {
@@ -320,7 +320,7 @@ const addProductScene = new Scenes.WizardScene(
 
 addProductScene.action('cancel_add', async (ctx) => {
     ctx.answerCbQuery('Abgebrochen').catch(() => {});
-    await uiHelper.sendTemporary(ctx, texts.getActionCanceled(), 2);
+    await uiHelper.sendTemporary(ctx, 'Aktion abgebrochen.', 2);
     return ctx.scene.leave();
 });
 
