@@ -1,8 +1,18 @@
 /**
- * adminProductActions.js – v0.5.64
+ * adminProductActions.js – v0.5.65
  * 
  * Admin-Produktverwaltung mit flicker-freier Medien-Anzeige.
- * Verwendet showProductWithMedia für intelligente Media/Text-Übergänge.
+ * 
+ * FIX v0.5.65: Kritischer Regex-Overlap behoben!
+ * ─────────────────────────────────────────────────────
+ * BUG: /^admin_del_prod_(.+)$/ matchte auch "admin_del_prod_confirm_XXX"
+ *      weil (.+) ALLES matcht inkl. Unterstriche.
+ *      → Beide Handler feuerten gleichzeitig beim Bestätigen.
+ *      → Handler 1 versuchte getProductById("confirm_XXX") → Supabase Error.
+ *      → "❌ Fehler beim Löschen." wurde pro Klick 1x extra gesendet.
+ * 
+ * FIX: Negative Lookahead (?!confirm_) verhindert den Overlap.
+ *      /^admin_del_prod_((?!confirm_).+)$/ matcht NUR echte Produkt-IDs.
  */
 
 const productRepo = require('../../database/repositories/productRepo');
@@ -92,7 +102,6 @@ module.exports = (bot) => {
             const backCb = getBackCb(product);
             const keyboard = adminKeyboards.getEditProductMenu(product, deliveryLabel, backCb);
 
-            // Intelligente Media-Anzeige: editMessageMedia wenn möglich, sonst delete+send
             await uiHelper.showProductWithMedia(ctx, product.image_url, text, keyboard);
         } catch (error) { console.error('admin_edit_prod error:', error.message); }
     });
@@ -210,17 +219,27 @@ module.exports = (bot) => {
         } catch (error) { console.error('admin_sort_prod error:', error.message); }
     });
 
-    // ─── PRODUKT LÖSCHEN ─────────────────────────────────────────────────────
-    bot.action(/^admin_del_prod_(.+)$/, isAdmin, async (ctx) => {
+    // ─── PRODUKT LÖSCHEN (FIX: Negative Lookahead gegen Regex-Overlap) ──────
+    //
+    // WICHTIG: (?!confirm_) stellt sicher, dass "admin_del_prod_confirm_XXX"
+    // NICHT von diesem Handler gefangen wird. Ohne diesen Fix feuerten BEIDE
+    // Handler gleichzeitig, was zu "Fehler beim Löschen" führte.
+    //
+    bot.action(/^admin_del_prod_((?!confirm_).+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
+            const productId = ctx.match[1];
             const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
-            const product = await productRepo.getProductById(ctx.match[1]);
-            if (!product) return ctx.answerCbQuery('⚠️ Produkt nicht gefunden.', { show_alert: true });
+            const product = await productRepo.getProductById(productId);
+            
+            if (!product) {
+                return ctx.answerCbQuery('⚠️ Produkt nicht gefunden.', { show_alert: true }).catch(() => {});
+            }
 
             const backCb = getBackCb(product);
 
             if (isMaster) {
+                // Master kann direkt löschen – Bestätigungsdialog
                 await uiHelper.updateOrSend(ctx,
                     `🗑 *Produkt endgültig löschen?*\n\n📦 *${product.name}*\n\n⚠️ Diese Aktion kann nicht rückgängig gemacht werden!`,
                     {
@@ -231,9 +250,11 @@ module.exports = (bot) => {
                     }
                 );
             } else {
+                // Temporärer Admin → Anfrage an Master
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 const approval = await approvalRepo.createApproval(product.id, 'DELETE', null, adminName);
 
+                // Master per Direktnachricht benachrichtigen
                 await notificationService.notifyMasterProductDeleteRequest({
                     adminName,
                     productName: product.name,
@@ -247,8 +268,8 @@ module.exports = (bot) => {
                 );
             }
         } catch (error) {
-            console.error('admin_del_prod error:', error.message);
-            ctx.reply('❌ Fehler beim Löschen.');
+            console.error('[adminProductActions] admin_del_prod error:', error.message);
+            await ctx.reply('❌ Fehler beim Löschen. Bitte versuche es erneut.').catch(() => {});
         }
     });
 
@@ -259,11 +280,17 @@ module.exports = (bot) => {
             if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
                 return ctx.answerCbQuery('⛔ Nur der Master kann endgültig löschen.', { show_alert: true });
             }
-            const product = await productRepo.getProductById(ctx.match[1]);
-            const productName = product?.name || `ID: ${ctx.match[1]}`;
-            const backCb = getBackCb(product);
 
-            await productRepo.deleteProduct(ctx.match[1]);
+            const productId = ctx.match[1];
+
+            // Produkt-Info VOR dem Löschen laden (für Bestätigung + backCb)
+            const product = await productRepo.getProductById(productId).catch(() => null);
+            const productName = product?.name || `ID: ${productId}`;
+            const backCb = product ? getBackCb(product) : 'admin_manage_products';
+
+            // Löschung durchführen
+            await productRepo.deleteProduct(productId);
+
             ctx.answerCbQuery('🗑 Produkt gelöscht.').catch(() => {});
 
             await uiHelper.updateOrSend(ctx,
@@ -271,8 +298,17 @@ module.exports = (bot) => {
                 { inline_keyboard: [[{ text: '🔙 Zurück zu Produkten', callback_data: backCb }]] }
             );
         } catch (error) {
-            console.error('admin_del_prod_confirm error:', error.message);
-            ctx.reply('❌ Fehler beim Löschen.');
+            console.error('[adminProductActions] admin_del_prod_confirm error:', error.message);
+            
+            // Spezifische Fehlermeldung je nach Problem
+            const errMsg = (error.message || '').toLowerCase();
+            if (errMsg.includes('violates foreign key') || errMsg.includes('foreign key')) {
+                await ctx.reply('❌ Produkt kann nicht gelöscht werden – es gibt noch zugehörige Bestellungen.').catch(() => {});
+            } else if (errMsg.includes('not found') || errMsg.includes('no rows')) {
+                await ctx.reply('⚠️ Produkt wurde bereits gelöscht oder existiert nicht mehr.').catch(() => {});
+            } else {
+                await ctx.reply(`❌ Fehler beim Löschen: ${error.message}`).catch(() => {});
+            }
         }
     });
 };

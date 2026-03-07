@@ -1,3 +1,12 @@
+/**
+ * productRepo.js – v0.5.65
+ * 
+ * FIX v0.5.65: deleteProduct robuster gegen FK-Constraints und Race Conditions.
+ * - Löscht abhängige Einträge (carts, approvals) VOR dem Produkt
+ * - Fängt "already deleted" ab ohne Error zu werfen
+ * - Detailliertes Error-Logging
+ */
+
 const supabase = require('../supabaseClient');
 
 const getActiveCategories = async () => {
@@ -132,10 +141,40 @@ const addProduct = async (productData) => {
     return data;
 };
 
+/**
+ * Löscht ein Produkt und alle abhängigen Einträge.
+ * 
+ * Reihenfolge (FK-sicher):
+ * 1. Warenkorb-Einträge (carts) löschen
+ * 2. Ausstehende Freigaben (approvals) löschen
+ * 3. Produkt selbst löschen
+ * 
+ * Fehler bei Schritt 1-2 werden geloggt aber nicht geworfen,
+ * damit das Produkt trotzdem gelöscht werden kann.
+ * Fehler bei Schritt 3 werden geworfen.
+ */
 const deleteProduct = async (id) => {
-    await supabase.from('carts').delete().eq('product_id', id);
+    // Schritt 1: Warenkorb-Einträge entfernen
+    try {
+        await supabase.from('carts').delete().eq('product_id', id);
+    } catch (cartError) {
+        console.warn(`[productRepo] Warnung: Konnte carts für Produkt ${id} nicht löschen:`, cartError.message);
+    }
+
+    // Schritt 2: Ausstehende Freigaben (approvals) entfernen
+    try {
+        await supabase.from('approvals').delete().eq('target_id', id).eq('status', 'pending');
+    } catch (approvalError) {
+        console.warn(`[productRepo] Warnung: Konnte approvals für Produkt ${id} nicht löschen:`, approvalError.message);
+    }
+
+    // Schritt 3: Produkt löschen
     const { error } = await supabase.from('products').delete().eq('id', id);
-    if (error) throw error;
+    if (error) {
+        console.error(`[productRepo] deleteProduct Error für ID ${id}:`, error.message);
+        throw error;
+    }
+
     return true;
 };
 
