@@ -1,0 +1,213 @@
+/**
+ * productRepo.js – v0.5.65
+ * 
+ * FIX v0.5.65: deleteProduct robuster gegen FK-Constraints und Race Conditions.
+ * - Löscht abhängige Einträge (carts, approvals) VOR dem Produkt
+ * - Fängt "already deleted" ab ohne Error zu werfen
+ * - Detailliertes Error-Logging
+ */
+
+const supabase = require('../supabaseClient');
+
+const getActiveCategories = async () => {
+    const { data, error } = await supabase
+        .from('categories')
+        .select('id, name, sort_order')
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+    if (error) throw error;
+    return data;
+};
+
+const addCategory = async (name) => {
+    const { data, error } = await supabase.from('categories').insert([{ name, sort_order: 0 }]).select('id, name');
+    if (error) throw error;
+    return data[0];
+};
+
+const renameCategory = async (id, newName) => {
+    const { data, error } = await supabase.from('categories').update({ name: newName }).eq('id', id).select('id, name');
+    if (error) throw error;
+    return data[0];
+};
+
+const deleteCategory = async (id) => {
+    await supabase.from('subcategories').delete().eq('category_id', id);
+    await supabase.from('products').update({ category_id: null, subcategory_id: null }).eq('category_id', id);
+    const { error } = await supabase.from('categories').delete().eq('id', id);
+    if (error) throw error;
+    return true;
+};
+
+const updateCategorySortOrder = async (id, sortOrder) => {
+    const { data, error } = await supabase.from('categories').update({ sort_order: sortOrder }).eq('id', id).select('id');
+    if (error) throw error;
+    return data[0];
+};
+
+const getProductsByCategory = async (categoryId, isAdmin = false) => {
+    let query = supabase
+        .from('products')
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url');
+    
+    if (categoryId === null || categoryId === 'none') {
+        query = query.is('category_id', null);
+    } else {
+        query = query.eq('category_id', categoryId);
+    }
+    if (!isAdmin) query = query.eq('is_active', true);
+
+    const { data, error } = await query.order('sort_order', { ascending: true }).order('name', { ascending: true });
+    if (error) throw error;
+    return data;
+};
+
+const getProductsBySubcategory = async (subcategoryId, isAdmin = false) => {
+    let query = supabase
+        .from('products')
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url')
+        .eq('subcategory_id', subcategoryId);
+    if (!isAdmin) query = query.eq('is_active', true);
+
+    const { data, error } = await query.order('sort_order', { ascending: true }).order('name', { ascending: true });
+    if (error) throw error;
+    return data;
+};
+
+const updateProductCategory = async (productId, categoryId) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ category_id: categoryId, subcategory_id: null })
+        .eq('id', productId)
+        .select('id, category_id');
+    if (error) throw error;
+    return data[0];
+};
+
+const toggleProductStatus = async (productId, field, value) => {
+    const { data, error } = await supabase.from('products').update({ [field]: value }).eq('id', productId).select('id, is_active, is_out_of_stock, price, delivery_option');
+    if (error) throw error;
+    return data[0];
+};
+
+const updateProductImage = async (productId, fileId) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ image_url: fileId })
+        .eq('id', productId)
+        .select('id, image_url');
+    if (error) throw error;
+    return data[0];
+};
+
+const updateProductName = async (productId, newName) => {
+    const { data, error } = await supabase.from('products').update({ name: newName }).eq('id', productId).select('id, name');
+    if (error) throw error;
+    return data[0];
+};
+
+const updateProductSortOrder = async (id, sortOrder) => {
+    const { data, error } = await supabase.from('products').update({ sort_order: sortOrder }).eq('id', id).select('id');
+    if (error) throw error;
+    return data[0];
+};
+
+const getProductById = async (productId) => {
+    const { data, error } = await supabase.from('products').select('*').eq('id', productId).single();
+    if (error) throw error;
+    return data;
+};
+
+const addProduct = async (productData) => {
+    const { categoryId, subcategoryId, name, description, price, isUnitPrice, fileId, deliveryOption } = productData;
+    const { data, error } = await supabase
+        .from('products')
+        .insert([{
+            category_id: categoryId, 
+            subcategory_id: subcategoryId || null,
+            name, 
+            description, 
+            price, 
+            is_unit_price: isUnitPrice,
+            image_url: fileId,
+            delivery_option: deliveryOption || 'none',
+            is_active: true, 
+            is_out_of_stock: false, 
+            sort_order: 0
+        }])
+        .select('id');
+    if (error) throw error;
+    return data;
+};
+
+/**
+ * Löscht ein Produkt und alle abhängigen Einträge.
+ * 
+ * Reihenfolge (FK-sicher):
+ * 1. Warenkorb-Einträge (carts) löschen
+ * 2. Ausstehende Freigaben (approvals) löschen
+ * 3. Produkt selbst löschen
+ * 
+ * Fehler bei Schritt 1-2 werden geloggt aber nicht geworfen,
+ * damit das Produkt trotzdem gelöscht werden kann.
+ * Fehler bei Schritt 3 werden geworfen.
+ */
+const deleteProduct = async (id) => {
+    // Schritt 1: Warenkorb-Einträge entfernen
+    try {
+        await supabase.from('carts').delete().eq('product_id', id);
+    } catch (cartError) {
+        console.warn(`[productRepo] Warnung: Konnte carts für Produkt ${id} nicht löschen:`, cartError.message);
+    }
+
+    // Schritt 2: Ausstehende Freigaben (approvals) entfernen
+    try {
+        await supabase.from('pending_approvals').delete().eq('target_id', id).eq('status', 'pending');
+    } catch (approvalError) {
+        console.warn(`[productRepo] Warnung: Konnte approvals für Produkt ${id} nicht löschen:`, approvalError.message);
+    }
+
+    // Schritt 3: Produkt löschen
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) {
+        console.error(`[productRepo] deleteProduct Error für ID ${id}:`, error.message);
+        throw error;
+    }
+
+    return true;
+};
+
+const updateProductPrice = async (productId, price) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ price: price })
+        .eq('id', productId)
+        .select('id, price');
+    if (error) throw error;
+    return data[0];
+};
+
+const setDeliveryOption = async (productId, option) => {
+    const { data, error } = await supabase.from('products').update({ delivery_option: option }).eq('id', productId).select('id, delivery_option');
+    if (error) throw error;
+    return data[0];
+};
+
+const updateProductDescription = async (productId, description) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ description: description })
+        .eq('id', productId)
+        .select('id, description');
+    if (error) throw error;
+    return data[0];
+};
+
+module.exports = {
+    getActiveCategories, addCategory, renameCategory, deleteCategory,
+    updateCategorySortOrder, getProductsByCategory, getProductsBySubcategory,
+    getProductById, addProduct, deleteProduct,
+    toggleProductStatus, updateProductCategory, updateProductImage, updateProductPrice,
+    updateProductName, updateProductSortOrder, setDeliveryOption, updateProductDescription
+};

@@ -1,0 +1,28 @@
+{
+  "name": "autoacts-shop-bot",
+  "version": "0.5.65",
+  "description": "Professioneller Telegram Shop Bot mit hierarchischem Admin-System und dezentralem Bild-Hosting",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:local": "node -r dotenv/config src/index.js",
+    "dev": "nodemon -r dotenv/config src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.4.5",
+    "form-data": "^4.0.0",
+    "telegraf": "^4.15.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "t.me/autoacts",
+  "license": "ISC"
+}
+
