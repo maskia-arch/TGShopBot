@@ -1,12 +1,12 @@
 module.exports = () => {
     return {
         inline_keyboard: [
-            [{ text: '⚙️ Shop Verwaltung', callback_data: 'master_shop_management' }],
-            [{ text: '📋 Offene Bestellungen', callback_data: 'admin_open_orders' }],
-            [{ text: '🔐 Deliverables Tresor', callback_data: 'master_deliverables_tresor' }],
-            [{ text: '📊 Kundenübersicht', callback_data: 'master_customer_overview' }],
-            [{ text: '🛠️ Admin Panel öffnen', callback_data: 'admin_panel' }],
-            [{ text: 'ℹ️ Befehle & Info', callback_data: 'master_info' }]
+            [{ text: '📦 Sortiment verwalten', callback_data: 'admin_manage_catalog_hub', style: 'primary' }],
+            [{ text: '📋 Bestellungen & Tresor', callback_data: 'master_orders_hub', style: 'primary' }],
+            [{ text: '👥 Kunden & Marketing', callback_data: 'master_customers_hub', style: 'primary' }],
+            [{ text: '⚙️ Einstellungen & Personal', callback_data: 'master_settings_hub', style: 'primary' }],
+            [{ text: '👁️ Kundenansicht testen', callback_data: 'shop_menu', style: 'primary' }],
+            [{ text: 'ℹ️ Befehle & Info', callback_data: 'master_info', style: 'primary' }]
         ]
     };
 };

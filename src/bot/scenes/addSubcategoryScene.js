@@ -24,7 +24,7 @@ const addSubcategoryScene = new Scenes.WizardScene(
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
-                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene', style: 'danger' }]]
             }
         });
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
@@ -49,7 +49,7 @@ const addSubcategoryScene = new Scenes.WizardScene(
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene', style: 'danger' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);

@@ -19,7 +19,7 @@ try {
 }
 
 const versionFilePath = path.join(__dirname, '../../version.txt');
-let botVersion = '0.5.65';
+let botVersion = '0.6';
 
 try {
     if (fs.existsSync(versionFilePath)) {

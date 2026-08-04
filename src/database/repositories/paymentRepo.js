@@ -1,10 +1,9 @@
 const supabase = require('../supabaseClient');
 
 const getActivePaymentMethods = async () => {
-    // Wir laden nur die Felder, die für die Button-Anzeige im Checkout wichtig sind
     const { data, error } = await supabase
         .from('payment_methods')
-        .select('id, name')
+        .select('id, name, wallet_address, is_active, auto_verify, crypto_symbol')
         .eq('is_active', true)
         .order('name', { ascending: true });
 
@@ -13,11 +12,9 @@ const getActivePaymentMethods = async () => {
 };
 
 const getPaymentMethod = async (id) => {
-    // Wenn eine spezifische Methode geladen wird (z.B. für Wallet-Details), 
-    // laden wir alle relevanten Daten für die Rechnung.
     const { data, error } = await supabase
         .from('payment_methods')
-        .select('id, name, wallet_address, is_active')
+        .select('id, name, wallet_address, is_active, auto_verify, crypto_symbol')
         .eq('id', id)
         .single();
 
@@ -25,14 +22,15 @@ const getPaymentMethod = async (id) => {
     return data;
 };
 
-const addPaymentMethod = async (name, address = null) => {
-    // Minimierter Rückgabewert: Wir brauchen meist nur die ID zur Bestätigung
+const addPaymentMethod = async (name, address = null, cryptoSymbol = 'BTC', autoVerify = false) => {
     const { data, error } = await supabase
         .from('payment_methods')
         .insert([{
             name: name,
             wallet_address: address,
-            is_active: true
+            is_active: true,
+            auto_verify: autoVerify,
+            crypto_symbol: cryptoSymbol
         }])
         .select('id, name');
 
@@ -40,8 +38,29 @@ const addPaymentMethod = async (name, address = null) => {
     return data[0];
 };
 
+const toggleAutoVerify = async (id, autoVerify) => {
+    const { data, error } = await supabase
+        .from('payment_methods')
+        .update({ auto_verify: autoVerify })
+        .eq('id', id)
+        .select();
+
+    if (error) throw error;
+    return data ? data[0] : null;
+};
+
+const updateCryptoSymbol = async (id, symbol) => {
+    const { data, error } = await supabase
+        .from('payment_methods')
+        .update({ crypto_symbol: symbol.toUpperCase().trim() })
+        .eq('id', id)
+        .select();
+
+    if (error) throw error;
+    return data ? data[0] : null;
+};
+
 const deletePaymentMethod = async (id) => {
-    // Ein einfaches DELETE ohne Rückgabe des Objekts ist schneller
     const { error } = await supabase
         .from('payment_methods')
         .delete()
@@ -55,5 +74,7 @@ module.exports = {
     getActivePaymentMethods,
     getPaymentMethod,
     addPaymentMethod,
+    toggleAutoVerify,
+    updateCryptoSymbol,
     deletePaymentMethod
 };

@@ -1,22 +1,9 @@
 /**
- * uiHelper.js – v0.5.64
+ * uiHelper.js – v0.5.67
  * 
- * Zentrales UI-System mit flicker-freier Medien-Anzeige.
- * 
- * Kernverbesserungen gegenüber v0.5.63:
- * ─────────────────────────────────────────────────────
- * 1. editMessageMedia: Medien-Nachrichten werden in-place aktualisiert,
- *    statt delete+resend. Kein Flackern, keine Race Conditions.
- * 
- * 2. Intelligenter Nachrichten-Typ-Wechsel:
- *    - Media→Media: editMessageMedia (flicker-frei)
- *    - Media→Text: deleteMessage + reply (notwendig)
- *    - Text→Media: deleteMessage + sendMedia (notwendig)
- *    - Text→Text: editMessageText (flicker-frei)
- * 
- * 3. Automatischer Parse-Mode-Fallback (Markdown → HTML → Plain)
- * 
- * 4. Telegram Caption-Limit: Automatische Kürzung auf 1024 Zeichen
+ * Zentrales UI-System mit Ausfallsicherheit, automatischer Tastatur-Bereinigung,
+ * flicker-freier Medien-Anzeige, ständiger Erreichbarkeit für den Anwender
+ * sowie intelligenten Selbstlöschungs- & Sitzungs-Timern.
  */
 
 const texts = require('./texts');
@@ -30,9 +17,82 @@ const {
 // Telegram Caption-Limit
 const CAPTION_LIMIT = 1024;
 
+// Aktive Sitzungs- / Timer-Verwaltung pro Chat (Map<chatId, { messageId, timer, ttlMs }>)
+const activeSessions = new Map();
+
+const isPersistentContent = (text) => {
+    if (!text || typeof text !== 'string') return false;
+    return text.includes('digital_delivery') || 
+           text.includes('Gelieferte') || 
+           text.includes('Tresor') || 
+           text.includes('Lieferung ist da') || 
+           text.includes('Inhalt:') || 
+           text.includes('Bestellung #');
+};
+
+/**
+ * Registriert oder aktualisiert den Selbstlöschungs- / Expiration-Timer für eine Chat-Ansicht.
+ */
+const scheduleMessageExpiry = (telegram, chatId, messageId, ttlMs = 600000, text = '') => {
+    if (!chatId || !messageId) return;
+
+    // NIEMALS Dauerhafte Liefer- / Bestellungs-Nachrichten per Timer ablaufen lassen!
+    if (isPersistentContent(text)) return;
+
+    // Beende vorherigen Timer für diesen Chat
+    if (activeSessions.has(chatId)) {
+        const existing = activeSessions.get(chatId);
+        if (existing.timer) clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(async () => {
+        try {
+            activeSessions.delete(chatId);
+            
+            const expiredText = '⌛ *Diese Sitzung ist abgelaufen.*\n\n' +
+                '_Da einige Minuten keine Eingabe erfolgte, wurde das Fenster aus Sicherheitsgründen geschlossen._\n\n' +
+                'Bitte klicke unten, um den Bot neu zu starten:';
+            
+            const expiredKeyboard = {
+                inline_keyboard: [
+                    [{ text: '🔄 Bot neu starten (/start)', callback_data: 'back_to_main', style: 'primary' }]
+                ]
+            };
+
+            await telegram.editMessageText(chatId, messageId, null, expiredText, {
+                parse_mode: 'Markdown',
+                reply_markup: expiredKeyboard
+            }).catch(async () => {
+                await telegram.deleteMessage(chatId, messageId).catch(() => {});
+                await telegram.sendMessage(chatId, expiredText, {
+                    parse_mode: 'Markdown',
+                    reply_markup: expiredKeyboard
+                }).catch(() => {});
+            });
+        } catch (e) {
+            console.error('[UIHelper Expiry] Fehler beim Ablaufen der Sitzung:', e.message);
+        }
+    }, ttlMs);
+
+    activeSessions.set(chatId, { messageId, timer, ttlMs });
+};
+
+/**
+ * Setzt den Timer bei Benutzer-Interaktion zurück oder hebt alte Timer auf.
+ */
+const touchSession = (ctx) => {
+    const chatId = ctx.chat?.id;
+    if (!chatId) return;
+
+    if (activeSessions.has(chatId)) {
+        const sessionObj = activeSessions.get(chatId);
+        if (sessionObj.timer) clearTimeout(sessionObj.timer);
+        activeSessions.delete(chatId);
+    }
+};
+
 /**
  * Kürzt Text auf das Telegram-Caption-Limit (1024 Zeichen).
- * Schneidet am letzten Zeilenumbruch vor dem Limit ab und fügt "..." hinzu.
  */
 const truncateCaption = (text) => {
     if (!text || text.length <= CAPTION_LIMIT) return text;
@@ -40,6 +100,37 @@ const truncateCaption = (text) => {
     const lastNewline = truncated.lastIndexOf('\n');
     return (lastNewline > CAPTION_LIMIT * 0.5 ? truncated.substring(0, lastNewline) : truncated) + '...';
 };
+
+/**
+ * Bereinigt Keyboard-Objekte von inkompatiblen Attributen,
+ * damit Telegram API Aufrufe niemals aufgrund von Markup-Fehlern abbrechen.
+ */
+const sanitizeKeyboard = (replyMarkup) => {
+    if (!replyMarkup || !replyMarkup.inline_keyboard) return replyMarkup;
+    try {
+        const cleanKeyboard = replyMarkup.inline_keyboard.map(row => {
+            if (!Array.isArray(row)) return [];
+            return row.map(btn => {
+                if (!btn || typeof btn !== 'object') return btn;
+                const { style, ...cleanBtn } = btn;
+                return cleanBtn;
+            });
+        });
+        return { inline_keyboard: cleanKeyboard };
+    } catch (e) {
+        return replyMarkup;
+    }
+};
+
+/**
+ * Erzeugt eine Notfall-Tastatur, damit der Anwender NIEMALS in einem Hänger stecken bleibt.
+ */
+const getEmergencyKeyboard = () => ({
+    inline_keyboard: [
+        [{ text: '🔄 Erneut versuchen', callback_data: 'back_to_main' }],
+        [{ text: '🏠 Hauptmenü', callback_data: 'back_to_main' }]
+    ]
+});
 
 /**
  * Prüft ob die aktuelle Callback-Nachricht ein Medium enthält.
@@ -52,80 +143,59 @@ const currentMessageHasMedia = (ctx) => {
 
 /**
  * Sendet ein Produkt-Medium (Foto/GIF/Video) als neue Nachricht.
- * Löscht vorherige Callback-Nachricht falls vorhanden.
- * 
- * Verwendet sendMediaWithRetry für zuverlässige Zustellung mit Retry-Logik.
- * Falls alle Media-Versuche fehlschlagen, wird ein Text-Fallback gesendet.
- * 
- * @param {Object} ctx - Telegraf Context
- * @param {string} imageUrl - Gespeicherte image_url (z.B. "photo:FILE_ID")
- * @param {string} text - Caption-Text
- * @param {Object} replyMarkup - Inline-Keyboard Objekt
- * @returns {Promise<Object>} - Gesendete Nachricht
  */
 const sendProductMedia = async (ctx, imageUrl, text, replyMarkup) => {
+    touchSession(ctx);
     const caption = truncateCaption(text);
     const options = { caption, parse_mode: 'Markdown', reply_markup: replyMarkup };
 
-    // Alte Nachricht löschen (Callback-Kontext)
     if (ctx.callbackQuery?.message) {
         await ctx.deleteMessage().catch(() => {});
     }
 
-    // Kein Medium → nur Text
+    let sentMsg = null;
+
     if (!imageUrl) {
-        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
-            .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+        sentMsg = await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
+            .catch(() => ctx.reply(text, { reply_markup: sanitizeKeyboard(replyMarkup) }));
+    } else {
+        const { type, fileId } = parseStoredMedia(imageUrl);
+        if (!type || !fileId) {
+            sentMsg = await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
+                .catch(() => ctx.reply(text, { reply_markup: sanitizeKeyboard(replyMarkup) }));
+        } else {
+            try {
+                sentMsg = await sendMediaWithRetry(ctx, type, fileId, options);
+            } catch (error) {
+                console.error(`[UIHelper] sendProductMedia fehlgeschlagen: ${error.message}`);
+                const fallbackText = text + texts.getAdminImageLoadError();
+                sentMsg = await ctx.reply(fallbackText, { parse_mode: 'Markdown', reply_markup: sanitizeKeyboard(replyMarkup) })
+                    .catch(() => ctx.reply(fallbackText, { reply_markup: getEmergencyKeyboard() }));
+            }
+        }
     }
 
-    const { type, fileId } = parseStoredMedia(imageUrl);
-
-    if (!type || !fileId) {
-        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
-            .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+    if (sentMsg && sentMsg.message_id && ctx.chat?.id) {
+        const ttlMs = (text && (text.includes('Checkout') || text.includes('Rechnung'))) ? 1800000 : 600000;
+        scheduleMessageExpiry(ctx.telegram, ctx.chat.id, sentMsg.message_id, ttlMs);
     }
-
-    // Medium senden mit Retry
-    try {
-        return await sendMediaWithRetry(ctx, type, fileId, options);
-    } catch (error) {
-        console.error(`[UIHelper] sendProductMedia fehlgeschlagen: ${error.message}`);
-        // Text-Fallback ohne Bild
-        const fallbackText = text + texts.getAdminImageLoadError();
-        return await ctx.reply(fallbackText, { parse_mode: 'Markdown', reply_markup: replyMarkup })
-            .catch(() => ctx.reply(fallbackText, { reply_markup: replyMarkup }));
-    }
+    return sentMsg;
 };
 
 /**
  * Zeigt ein Produkt mit optionalem Medium intelligent an.
- * 
- * Strategie:
- * ─────────────────────────────────────────────────────
- * Wenn die aktuelle Nachricht ein Medium ist UND wir ein Medium anzeigen wollen:
- *   → editMessageMedia (flicker-frei, schnell)
- * 
- * Wenn die aktuelle Nachricht Text ist UND wir ein Medium anzeigen wollen:
- *   → deleteMessage + sendMedia (notwendiger Wechsel)
- * 
- * Wenn wir kein Medium anzeigen wollen:
- *   → updateOrSend (normaler Text-Flow)
- * 
- * @param {Object} ctx - Telegraf Context
- * @param {string|null} imageUrl - Gespeicherte image_url oder null
- * @param {string} text - Nachrichtentext / Caption
- * @param {Object} replyMarkup - Inline-Keyboard
- * @returns {Promise<Object>}
  */
 const showProductWithMedia = async (ctx, imageUrl, text, replyMarkup) => {
-    // Kein Medium → normaler Text-Flow
     if (!imageUrl) {
         const hasMedia = currentMessageHasMedia(ctx);
         if (hasMedia) {
-            // Aktuelle Nachricht hat Medium, neue nicht → löschen + Text
             await ctx.deleteMessage().catch(() => {});
-            return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
-                .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+            const sentMsg = await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: replyMarkup })
+                .catch(() => ctx.reply(text, { reply_markup: sanitizeKeyboard(replyMarkup) }));
+            if (sentMsg && sentMsg.message_id && ctx.chat?.id) {
+                scheduleMessageExpiry(ctx.telegram, ctx.chat.id, sentMsg.message_id, 600000);
+            }
+            return sentMsg;
         }
         return await updateOrSend(ctx, text, replyMarkup);
     }
@@ -137,76 +207,84 @@ const showProductWithMedia = async (ctx, imageUrl, text, replyMarkup) => {
 
     const caption = truncateCaption(text);
 
-    // Aktuelle Nachricht hat auch ein Medium → editMessageMedia (flicker-frei!)
     if (currentMessageHasMedia(ctx)) {
         const editResult = await editMediaMessage(ctx, type, fileId, caption, replyMarkup);
-        if (editResult) return editResult;
-        // editMessageMedia fehlgeschlagen → Fallback auf delete+resend
+        if (editResult && editResult.message_id && ctx.chat?.id) {
+            scheduleMessageExpiry(ctx.telegram, ctx.chat.id, editResult.message_id, 600000);
+            return editResult;
+        }
     }
 
-    // Kein Edit möglich → delete + neu senden
     return await sendProductMedia(ctx, imageUrl, text, replyMarkup);
 };
 
 /**
  * Aktualisiert eine bestehende Text-Nachricht oder sendet eine neue.
- * Handhabt den Wechsel zwischen Text- und Media-Nachrichten korrekt.
- * 
- * @param {Object} ctx - Telegraf Context
- * @param {string} text - Nachrichtentext
- * @param {Object} replyMarkup - Keyboard-Objekt
- * @param {string|null} imageUrl - Optionale image_url für Medien
- * @returns {Promise<Object>}
+ * Garantiert 100% Ausfallsicherheit & registriert automatischen Expiration-Timer.
  */
 const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
+    touchSession(ctx);
+
     const options = {
         parse_mode: 'Markdown',
         ...(replyMarkup && { reply_markup: replyMarkup })
     };
 
-    // Wenn imageUrl mitgegeben → über showProductWithMedia handhaben
     if (imageUrl) {
         return await showProductWithMedia(ctx, imageUrl, text, replyMarkup);
     }
+
+    let sentMsg = null;
 
     try {
         if (ctx.callbackQuery && ctx.callbackQuery.message) {
             const hasMedia = currentMessageHasMedia(ctx);
 
             if (hasMedia) {
-                // Media→Text: Löschen und neu senden
                 await ctx.deleteMessage().catch(() => {});
-                return await ctx.reply(text, options)
-                    .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+                sentMsg = await ctx.reply(text, options)
+                    .catch(async () => {
+                        const cleanMarkup = sanitizeKeyboard(replyMarkup);
+                        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: cleanMarkup })
+                            .catch(() => ctx.reply(text, { reply_markup: getEmergencyKeyboard() }));
+                    });
             } else {
-                // Text→Text: In-place editieren
-                return await ctx.editMessageText(text, options)
+                sentMsg = await ctx.editMessageText(text, options)
                     .catch(async (editError) => {
                         const errMsg = (editError.message || '').toLowerCase();
-                        // Markdown-Fehler → HTML versuchen
-                        if (errMsg.includes("can't parse") || errMsg.includes('parse entities')) {
-                            return await ctx.editMessageText(markdownToHtml(text), { 
-                                parse_mode: 'HTML', 
-                                reply_markup: replyMarkup 
+                        
+                        if (errMsg.includes('not modified')) return ctx.callbackQuery.message;
+
+                        const cleanMarkup = sanitizeKeyboard(replyMarkup);
+
+                        if (errMsg.includes("can't parse") || errMsg.includes('parse entities') || errMsg.includes('button')) {
+                            return await ctx.editMessageText(text, { 
+                                parse_mode: 'Markdown', 
+                                reply_markup: cleanMarkup 
                             }).catch(async () => {
-                                // Auch HTML fehlgeschlagen → delete+reply
-                                await ctx.deleteMessage().catch(() => {});
-                                return await ctx.reply(text, options)
-                                    .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+                                return await ctx.editMessageText(markdownToHtml(text), { 
+                                    parse_mode: 'HTML', 
+                                    reply_markup: cleanMarkup 
+                                }).catch(async () => {
+                                    await ctx.deleteMessage().catch(() => {});
+                                    return await ctx.reply(text, { reply_markup: cleanMarkup })
+                                        .catch(() => ctx.reply(text, { reply_markup: getEmergencyKeyboard() }));
+                                });
                             });
                         }
-                        // "message is not modified" → ignorieren
-                        if (errMsg.includes('not modified')) return;
-                        // Anderer Fehler → delete+reply
+
                         await ctx.deleteMessage().catch(() => {});
-                        return await ctx.reply(text, options)
-                            .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+                        return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: cleanMarkup })
+                            .catch(() => ctx.reply(text, { reply_markup: getEmergencyKeyboard() }));
                     });
             }
         } else {
-            // Kein Callback-Kontext → einfach senden
-            return await ctx.reply(text, options)
-                .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+            sentMsg = await ctx.reply(text, options)
+                .catch(async () => {
+                    const cleanMarkup = sanitizeKeyboard(replyMarkup);
+                    return await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: cleanMarkup })
+                        .catch(() => ctx.reply(text, { reply_markup: getEmergencyKeyboard() }));
+                });
         }
     } catch (error) {
         console.error('[UIHelper] updateOrSend Error:', error.message);
@@ -214,12 +292,24 @@ const updateOrSend = async (ctx, text, replyMarkup, imageUrl = null) => {
             if (ctx.callbackQuery?.message) {
                 await ctx.deleteMessage().catch(() => {});
             }
-            return await ctx.reply(text, options)
-                .catch(() => ctx.reply(text, { reply_markup: replyMarkup }));
+            const cleanMarkup = sanitizeKeyboard(replyMarkup);
+            sentMsg = await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: cleanMarkup })
+                .catch(() => ctx.reply(text, { reply_markup: getEmergencyKeyboard() }));
         } catch (fallbackError) {
             console.error('[UIHelper] Finaler Fallback Error:', fallbackError.message);
+            sentMsg = await ctx.reply('⚠️ *Ein kleiner Anzeigefehler ist aufgetreten.*\n\nBitte klicke unten auf Hauptmenü:', {
+                parse_mode: 'Markdown',
+                reply_markup: getEmergencyKeyboard()
+            }).catch(() => null);
         }
     }
+
+    if (sentMsg && sentMsg.message_id && ctx.chat?.id) {
+        const ttlMs = (text && (text.includes('Checkout') || text.includes('Rechnung') || text.includes('Zahlung'))) ? 1800000 : 600000;
+        scheduleMessageExpiry(ctx.telegram, ctx.chat.id, sentMsg.message_id, ttlMs);
+    }
+
+    return sentMsg;
 };
 
 /**
@@ -242,6 +332,10 @@ module.exports = {
     sendTemporary, 
     sendProductMedia, 
     showProductWithMedia,
-    parseMedia: parseStoredMedia, // Rückwärtskompatibel
-    truncateCaption
+    touchSession,
+    scheduleMessageExpiry,
+    parseMedia: parseStoredMedia,
+    truncateCaption,
+    sanitizeKeyboard,
+    getEmergencyKeyboard
 };

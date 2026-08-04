@@ -15,9 +15,25 @@ module.exports = (bot) => {
             const userId = ctx.from.id;
             const role = await userRepo.getUserRole(userId);
             const isMaster = userId === Number(config.MASTER_ADMIN_ID);
-            const keyboard = adminKeyboards.getAdminMenu(isMaster);
-            await uiHelper.updateOrSend(ctx, texts.getWelcomeText(isMaster, role), keyboard);
+            const masterMenu = require('../keyboards/masterMenu');
+
+            if (isMaster) {
+                await uiHelper.updateOrSend(ctx, texts.getWelcomeText(true, 'master'), masterMenu());
+            } else {
+                const keyboard = adminKeyboards.getAdminMenu(false);
+                await uiHelper.updateOrSend(ctx, texts.getWelcomeText(false, role), keyboard);
+            }
         } catch (error) {}
+    });
+
+    bot.action('admin_manage_catalog_hub', isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
+            const backCb = isMaster ? 'master_panel' : 'admin_panel';
+            const keyboard = adminKeyboards.getCatalogHubMenu(backCb);
+            await uiHelper.updateOrSend(ctx, '📦 *Sortimentsverwaltung*\n\nWähle einen Bereich zum Bearbeiten:', keyboard);
+        } catch (error) { console.error('admin_manage_catalog_hub error:', error.message); }
     });
 
     bot.action('admin_info', isAdmin, async (ctx) => {
@@ -33,6 +49,7 @@ module.exports = (bot) => {
             await ctx.scene.enter('broadcastScene'); 
         } catch (error) {}
     });
+
     // ─── PREIS-EINGABE FÜR TEMPORÄRE ADMINS ──────────────────────────────────
     bot.on('message', async (ctx, next) => {
         if (!ctx.session || !ctx.message?.text) return next();
@@ -65,8 +82,8 @@ module.exports = (bot) => {
                     `💲 Neu: ${formattedPrice}€`;
                 const keyboard = {
                     inline_keyboard: [
-                        [{ text: '✅ Genehmigen', callback_data: `master_approve_${approval.id}` }],
-                        [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${approval.id}` }]
+                        [{ text: '✅ Genehmigen', callback_data: `master_approve_${approval.id}`, style: 'success' }],
+                        [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${approval.id}`, style: 'danger' }]
                     ]
                 };
                 notificationService.sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard }).catch(() => {});

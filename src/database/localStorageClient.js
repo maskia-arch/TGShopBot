@@ -47,11 +47,15 @@ const TABLE_DEFAULTS = {
         delivery_option: 'none',
         description: null,
         image_url: null,
-        price: 0
+        price: 0,
+        kyc_mode: 'none',
+        kyc_options: []
     },
     payment_methods: {
         is_active: true,
-        wallet_address: null
+        wallet_address: null,
+        auto_verify: false,
+        crypto_symbol: 'BTC'
     },
     carts: {
         quantity: 1,
@@ -67,7 +71,14 @@ const TABLE_DEFAULTS = {
         payment_method_name: 'Nicht angegeben',
         shipping_link: null,
         tx_id: null,
-        total_amount: 0
+        total_amount: 0,
+        crypto_amount: null,
+        payment_identifier: null,
+        confirmations: 0,
+        received_crypto_amount: null,
+        crypto_rate: null,
+        last_rate_update: null,
+        kyc_submission: null
     },
     pending_approvals: {
         status: 'pending',
@@ -86,10 +97,25 @@ const TABLE_DEFAULTS = {
         rating: 5,
         comment: null
     },
+    product_deliverables: {
+        status: 'available',
+        order_id: null,
+        delivered_to: null,
+        delivered_at: null
+    },
+    coupons: {
+        discount_type: 'percent',
+        discount_value: 0,
+        product_id: null,
+        max_uses: null,
+        uses_count: 0,
+        expires_at: null,
+        is_active: true
+    },
     settings: {}
 };
 
-// Initialer Datenbank-Status (Vollständige Schema-Struktur aller 11 Tabellen)
+// Initialer Datenbank-Status (Vollständige Schema-Struktur aller 13 Tabellen)
 const INITIAL_DB = {
     users: [],
     categories: [],
@@ -108,6 +134,8 @@ const INITIAL_DB = {
     pending_approvals: [],
     pending_bans: [],
     feedbacks: [],
+    product_deliverables: [],
+    coupons: [],
     settings: [
         {
             key: 'welcome_message',

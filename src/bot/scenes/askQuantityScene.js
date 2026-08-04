@@ -1,6 +1,5 @@
 const { Scenes } = require('telegraf');
 const cartRepo = require('../../database/repositories/cartRepo');
-const uiHelper = require('../../utils/uiHelper');
 const texts = require('../../utils/texts');
 
 const cleanup = async (ctx) => {
@@ -23,7 +22,7 @@ const askQuantityScene = new Scenes.WizardScene(
         const msg = await ctx.reply(ctx.wizard.state.lastQuestion, {
             parse_mode: 'Markdown',
             reply_markup: {
-                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene', style: 'danger' }]]
             }
         });
         ctx.wizard.state.messagesToDelete.push(msg.message_id);
@@ -50,7 +49,7 @@ const askQuantityScene = new Scenes.WizardScene(
             const warningMsg = await ctx.reply(`⚠️ *Vorgang aktiv*\n\n${ctx.wizard.state.lastQuestion}`, {
                 parse_mode: 'Markdown',
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene', style: 'danger' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(warningMsg.message_id);
@@ -59,10 +58,10 @@ const askQuantityScene = new Scenes.WizardScene(
 
         const quantity = parseInt(input, 10);
 
-        if (isNaN(quantity) || quantity <= 0) {
-            const errorMsg = await ctx.reply('⚠️ Bitte gib eine gültige Zahl ein (z.B. 5):', {
+        if (isNaN(quantity) || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1000) {
+            const errorMsg = await ctx.reply('⚠️ Bitte gib eine gültige Zahl zwischen 1 und 1000 ein (z.B. 5):', {
                 reply_markup: {
-                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
+                    inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene', style: 'danger' }]]
                 }
             });
             ctx.wizard.state.messagesToDelete.push(errorMsg.message_id);
@@ -81,8 +80,8 @@ const askQuantityScene = new Scenes.WizardScene(
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }],
-                        [{ text: '🛍 Weiter einkaufen', callback_data: 'shop_menu' }]
+                        [{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view', style: 'success' }],
+                        [{ text: '🛍 Weiter einkaufen', callback_data: 'shop_menu', style: 'primary' }]
                     ]
                 }
             });

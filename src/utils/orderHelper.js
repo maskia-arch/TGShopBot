@@ -1,52 +1,58 @@
-const orderRepo = require('../database/repositories/orderRepo');
-const texts = require('./texts');
 const formatters = require('./formatters');
 
 async function clearOldNotifications(ctx, order) {
-    if (!order || !order.notification_msg_ids || order.notification_msg_ids.length === 0) return;
-    const currentMsgId = ctx.callbackQuery?.message?.message_id;
-    for (const msg of order.notification_msg_ids) {
+    if (!order || !order.notification_msg_ids || !Array.isArray(order.notification_msg_ids)) return;
+    for (const msgObj of order.notification_msg_ids) {
         try {
-            if (currentMsgId && msg.message_id === currentMsgId) continue;
-            await ctx.telegram.deleteMessage(msg.chat_id, msg.message_id);
+            await ctx.telegram.deleteMessage(msgObj.chat_id, msgObj.message_id).catch(() => {});
         } catch (e) {}
     }
-    await orderRepo.clearNotificationMsgIds(order.order_id);
 }
 
-async function buildOrderViewPayload(order) {
-    const date = formatters.formatDate(order.created_at);
+function buildAdminOrderView(order) {
+    const method = order.delivery_method || 'none';
+    let methodText = '⚡ *Digital / Automatisch*';
+    if (method === 'shipping') methodText = '🚚 *Versand an Adresse*';
+    if (method === 'pickup') methodText = '🏪 *Abholung vor Ort*';
+
+    const statusBadge = order.status === 'abgeschlossen' ? '🟢 Abgeschlossen' : 
+                        (order.status === 'abgebrochen' ? '🔴 Abgebrochen' : 
+                        (order.status === 'in_bearbeitung' ? '⚙️ In Bearbeitung' : '🟡 Offen'));
+
     let text = `📋 *Bestellung #${order.order_id}*\n\n`;
-    text += `👤 Kunde: ID ${order.user_id}\n📅 Datum: ${date}\n`;
-    text += `💰 Betrag: ${formatters.formatPrice(order.total_amount)}\n`;
-    text += `💳 Zahlung: ${order.payment_method_name || 'N/A'}\n`;
-    text += `📦 Status: ${texts.getStatusLabel(order.status)}\n`;
+    text += `👤 *Kunde:* \`${order.user_id}\`\n`;
+    text += `💰 *Gesamtsumme:* ${formatters.formatPrice(order.total_amount)}\n`;
+    text += `💳 *Zahlungsart:* ${order.payment_method_name || 'Nicht angegeben'}\n`;
+    if (order.crypto_amount) text += `🪙 *Krypto-Betrag:* \`${order.crypto_amount}\`\n`;
+    if (order.payment_identifier) text += `📌 *Kennziffer:* \`${order.payment_identifier}\`\n`;
+    text += `🚚 *Lieferart:* ${methodText}\n`;
+    text += `📊 *Status:* ${statusBadge}\n`;
 
-    const method = order.delivery_method;
-    if (method === 'shipping') text += `🚚 Lieferung: Versand\n`;
-    else if (method === 'pickup') text += `🏪 Lieferung: Abholung\n`;
-    else if (method === 'none' || !method) text += `📱 Lieferung: Digital\n`;
+    if (order.tx_id) text += `🔗 *TX-ID:* \`${order.tx_id}\`\n`;
 
-    if (order.shipping_link) text += `\n📦 Adresse: [Privnote](${order.shipping_link})`;
-    if (order.tx_id) text += `\n🔑 TX-ID: \`${order.tx_id}\``;
+    if (order.kyc_submission) {
+        const kyc = order.kyc_submission;
+        const optLabel = kyc.option === 'selfie' ? '📸 Selfie' : (kyc.option === 'id_card' ? '🆔 Personalausweis' : (kyc.option === 'selfie_with_id' ? '🤳 Selfie mit Ausweis' : '📝 Dokument'));
+        text += `🆔 *KYC-Legitimierung:* ${optLabel} übermittelt ✅\n`;
+    }
 
-    if (order.admin_notes && order.admin_notes.length > 0) {
-        text += `\n\n📝 *Notizen:*`;
-        order.admin_notes.forEach((note, i) => {
-            const nd = new Date(note.date).toLocaleString('de-DE', { timeZone: 'Europe/Berlin' });
-            text += `\n${i + 1}. _${note.author}_ (${nd}): ${note.text}`;
-        });
+    if (method === 'shipping' && order.shipping_link) {
+        text += `\n📍 *Versandadresse (Privnote):*\n${order.shipping_link}\n`;
     }
 
     if (order.digital_delivery) {
-        text += `\n\n🔐 *Gelieferter Inhalt (Tresor):*\n`;
-        text += `➖➖➖➖➖➖➖➖➖➖\n`;
-        text += order.digital_delivery;
-        text += `\n➖➖➖➖➖➖➖➖➖➖`;
+        text += `\n🔐 *Gelieferte Tresor-Daten:*\n${order.digital_delivery}\n`;
     }
 
-    if (order.details && order.details.length > 0) {
-        text += `\n\n*Artikel:*`;
+    if (order.admin_notes && order.admin_notes.length > 0) {
+        text += `\n📝 *Admin-Notizen:*\n`;
+        order.admin_notes.forEach(n => {
+            text += `▪️ _${n.admin}_: ${n.note}\n`;
+        });
+    }
+
+    if (order.details && Array.isArray(order.details) && order.details.length > 0) {
+        text += `\n📦 *Artikel:*\n`;
         order.details.forEach(item => {
             const path = item.category_path ? `_${item.category_path}_ » ` : '';
             text += `\n▪️ ${item.quantity}x ${path}${item.name} = ${formatters.formatPrice(item.total)}`;
@@ -54,21 +60,35 @@ async function buildOrderViewPayload(order) {
     }
 
     const keyboard = { inline_keyboard: [] };
-    keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}` }]);
+    keyboard.inline_keyboard.push([{ text: '👤 Kunden kontaktieren', url: `tg://user?id=${order.user_id}`, style: 'primary' }]);
+    if (order.kyc_submission && order.kyc_submission.fileId) {
+        keyboard.inline_keyboard.push([{ text: '🆔 KYC-Selfie / Medium anzeigen', callback_data: `admin_view_kyc_${order.order_id}`, style: 'primary' }]);
+    }
     if (method === 'none' || !method) {
-        keyboard.inline_keyboard.push([{ text: '📥 Digital Liefern', callback_data: `odeliv_${order.order_id}` }]);
+        keyboard.inline_keyboard.push([
+            { text: '🔐 Aus dem Tresor liefern', callback_data: `odeliv_vault_${order.order_id}`, style: 'success' },
+            { text: '📥 Manuell eingeben', callback_data: `odeliv_manual_${order.order_id}`, style: 'success' }
+        ]);
     }
     keyboard.inline_keyboard.push(
-        [{ text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_processing` }, { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand` }],
-        [{ text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen` }, { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen` }]
+        [{ text: '⚙️ In Bearbeitung', callback_data: `ostatus_${order.order_id}_processing`, style: 'primary' }, { text: '📦 Versendet', callback_data: `ostatus_${order.order_id}_versand`, style: 'primary' }],
+        [{ text: '✅ Abgeschlossen', callback_data: `ostatus_${order.order_id}_abgeschlossen`, style: 'success' }, { text: '❌ Abgebrochen', callback_data: `ostatus_${order.order_id}_abgebrochen`, style: 'danger' }]
     );
     if (order.feedback_invited) {
-        keyboard.inline_keyboard.push([{ text: '✅ Für Feedback qualifiziert', callback_data: 'noop' }]);
+        keyboard.inline_keyboard.push([{ text: '✅ Für Feedback qualifiziert', callback_data: 'noop', style: 'success' }]);
     } else {
-        keyboard.inline_keyboard.push([{ text: '⭐ Feedback erlauben', callback_data: `allow_fb_${order.order_id}` }]);
+        keyboard.inline_keyboard.push([{ text: '⭐ Feedback erlauben', callback_data: `allow_fb_${order.order_id}`, style: 'success' }]);
     }
-    keyboard.inline_keyboard.push([{ text: '📝 Notiz', callback_data: `onote_${order.order_id}` }], [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}` }], [{ text: '🔙 Zurück zum Panel', callback_data: 'admin_panel' }]);
+    keyboard.inline_keyboard.push(
+        [{ text: '📝 Notiz', callback_data: `onote_${order.order_id}`, style: 'primary' }],
+        [{ text: '🗑 Löschen', callback_data: `odel_${order.order_id}`, style: 'danger' }],
+        [{ text: '🔙 Zurück zum Panel', callback_data: 'admin_open_orders', style: 'danger' }]
+    );
     return { text, reply_markup: keyboard };
 }
 
-module.exports = { clearOldNotifications, buildOrderViewPayload };
+module.exports = {
+    clearOldNotifications,
+    buildAdminOrderView,
+    buildOrderViewPayload: buildAdminOrderView
+};

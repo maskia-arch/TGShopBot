@@ -190,53 +190,47 @@ const addProductScene = new Scenes.WizardScene(
                 };
 
                 if (deliveryMap[data]) {
-                    ctx.wizard.state.productData.deliveryOption = deliveryMap[data];
-                    try {
-                        const pd = ctx.wizard.state.productData;
-                        const subCatToSave = pd.subcategoryId === 'none' ? null : pd.subcategoryId;
-                        
-                        const result = await productRepo.addProduct({
-                            categoryId: pd.categoryId,
-                            subcategoryId: subCatToSave,
-                            name: pd.name,
-                            description: pd.description,
-                            price: pd.price,
-                            fileId: pd.fileId,
-                            deliveryOption: pd.deliveryOption
-                        });
-                        
-                        const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
-                        let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
-                        if (pd.fileId) successText += '\n🖼 Medium gespeichert';
+                    const chosenOption = deliveryMap[data];
+                    ctx.wizard.state.productData.deliveryOption = chosenOption;
 
-                        await ctx.editMessageText(successText, {
-                            parse_mode: 'Markdown',
-                            reply_markup: {
-                                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
-                            }
-                        }).catch(async () => {
-                            await ctx.reply(successText, {
-                                parse_mode: 'Markdown',
-                                reply_markup: {
-                                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
-                                }
-                            });
-                        });
-
-                        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
-                            notificationService.notifyAdminsNewProduct({
-                                adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
-                                productName: pd.name,
-                                categoryName: pd.categoryId || 'Keine',
-                                productId: result && result[0] ? result[0].id : 'Unbekannt',
-                                time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
-                            }).catch(() => {});
-                        }
-                    } catch (error) {
-                        console.error('[addProductScene] Error:', error.message);
-                        await ctx.reply(`⚠️ Fehler beim Speichern: ${error.message}`);
+                    if (chosenOption === 'shipping' || chosenOption === 'both') {
+                        ctx.wizard.state.step = 'kyc_mode';
+                        await showKycModeOptions(ctx);
+                        return;
+                    } else {
+                        ctx.wizard.state.productData.kycMode = 'none';
+                        ctx.wizard.state.productData.kycOptions = [];
+                        return await saveAndFinishProduct(ctx);
                     }
-                    return ctx.scene.leave();
+                }
+            }
+
+            if (ctx.wizard.state.step === 'kyc_mode') {
+                ctx.answerCbQuery().catch(() => {});
+                if (data === 'kyc_mode_none') {
+                    ctx.wizard.state.productData.kycMode = 'none';
+                    ctx.wizard.state.productData.kycOptions = [];
+                    return await saveAndFinishProduct(ctx);
+                }
+                if (data === 'kyc_mode_optional' || data === 'kyc_mode_required') {
+                    ctx.wizard.state.productData.kycMode = data === 'kyc_mode_optional' ? 'optional' : 'required';
+                    ctx.wizard.state.step = 'kyc_option';
+                    await showKycTypeOptions(ctx);
+                    return;
+                }
+            }
+
+            if (ctx.wizard.state.step === 'kyc_option') {
+                ctx.answerCbQuery().catch(() => {});
+                const typeMap = {
+                    'kyc_type_selfie': 'selfie',
+                    'kyc_type_id_card': 'id_card',
+                    'kyc_type_selfie_with_id': 'selfie_with_id',
+                    'kyc_type_custom': 'custom'
+                };
+                if (typeMap[data]) {
+                    ctx.wizard.state.productData.kycOptions = [typeMap[data]];
+                    return await saveAndFinishProduct(ctx);
                 }
             }
         }
@@ -329,10 +323,10 @@ const addProductScene = new Scenes.WizardScene(
 async function showDeliveryOptions(ctx) {
     const deliveryKeyboard = {
         inline_keyboard: [
-            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none' }],
-            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping' }],
-            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup' }],
-            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both' }]
+            [{ text: '📱 Kein Versand (digital)', callback_data: 'delivery_none', style: 'primary' }],
+            [{ text: '🚚 Nur Versand', callback_data: 'delivery_shipping', style: 'primary' }],
+            [{ text: '🏪 Nur Abholung', callback_data: 'delivery_pickup', style: 'primary' }],
+            [{ text: '🚚🏪 Versand & Abholung', callback_data: 'delivery_both', style: 'primary' }]
         ]
     };
 
@@ -345,6 +339,112 @@ async function showDeliveryOptions(ctx) {
             reply_markup: deliveryKeyboard
         });
     });
+}
+
+/**
+ * Hilfsfunktion: Zeigt den KYC-Modus an.
+ */
+async function showKycModeOptions(ctx) {
+    const kycKeyboard = {
+        inline_keyboard: [
+            [{ text: '❌ Kein KYC verlangen', callback_data: 'kyc_mode_none', style: 'primary' }],
+            [{ text: '🟡 Optionales KYC anbieten', callback_data: 'kyc_mode_optional', style: 'primary' }],
+            [{ text: '🔴 Pflicht-KYC (Verbindlich)', callback_data: 'kyc_mode_required', style: 'primary' }]
+        ]
+    };
+
+    await ctx.editMessageText?.('🆔 *Möchtest du eine KYC-Legitimierung für diesen Artikel aktivieren?*', {
+        parse_mode: 'Markdown',
+        reply_markup: kycKeyboard
+    }).catch(async () => {
+        await ctx.reply('🆔 *Möchtest du eine KYC-Legitimierung für diesen Artikel aktivieren?*', {
+            parse_mode: 'Markdown',
+            reply_markup: kycKeyboard
+        });
+    });
+}
+
+/**
+ * Hilfsfunktion: Zeigt die KYC-Optionen an.
+ */
+async function showKycTypeOptions(ctx) {
+    const typeKeyboard = {
+        inline_keyboard: [
+            [{ text: '📸 Selfie des Kunden', callback_data: 'kyc_type_selfie', style: 'primary' }],
+            [{ text: '🆔 Personalausweis / ID', callback_data: 'kyc_type_id_card', style: 'primary' }],
+            [{ text: '🤳 Selfie mit Ausweis', callback_data: 'kyc_type_selfie_with_id', style: 'primary' }],
+            [{ text: '📝 Freitext / Dokument', callback_data: 'kyc_type_custom', style: 'primary' }]
+        ]
+    };
+
+    await ctx.editMessageText?.('🆔 *Welchen Nachweis muss der Kunde erbringen?*', {
+        parse_mode: 'Markdown',
+        reply_markup: typeKeyboard
+    }).catch(async () => {
+        await ctx.reply('🆔 *Welchen Nachweis muss der Kunde erbringen?*', {
+            parse_mode: 'Markdown',
+            reply_markup: typeKeyboard
+        });
+    });
+}
+
+/**
+ * Hilfsfunktion: Speichert das Produkt final.
+ */
+async function saveAndFinishProduct(ctx) {
+    try {
+        const pd = ctx.wizard.state.productData;
+        const subCatToSave = pd.subcategoryId === 'none' ? null : pd.subcategoryId;
+        
+        const result = await productRepo.addProduct({
+            categoryId: pd.categoryId,
+            subcategoryId: subCatToSave,
+            name: pd.name,
+            description: pd.description,
+            price: pd.price,
+            fileId: pd.fileId,
+            deliveryOption: pd.deliveryOption,
+            kycMode: pd.kycMode || 'none',
+            kycOptions: pd.kycOptions || []
+        });
+        
+        const deliveryLabel = texts.getDeliveryLabel ? texts.getDeliveryLabel(pd.deliveryOption) : pd.deliveryOption;
+        let successText = `✅ *Produkt erstellt!*\n\n📦 *${pd.name}*\n💰 ${pd.price.toFixed(2)}€\n🚚 ${deliveryLabel}`;
+        if (pd.kycMode && pd.kycMode !== 'none') {
+            const kycModeLabel = texts.getKycModeLabel ? texts.getKycModeLabel(pd.kycMode) : pd.kycMode;
+            const kycTypeLabel = pd.kycOptions && pd.kycOptions[0] ? (texts.getKycTypeLabel ? texts.getKycTypeLabel(pd.kycOptions[0]) : pd.kycOptions[0]) : '';
+            successText += `\n🆔 KYC: ${kycModeLabel} (${kycTypeLabel})`;
+        }
+        if (pd.fileId) successText += '\n🖼 Medium gespeichert';
+
+        await ctx.editMessageText(successText, {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+            }
+        }).catch(async () => {
+            await ctx.reply(successText, {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'admin_manage_products' }]]
+                }
+            });
+        });
+
+        if (ctx.from.id !== Number(config.MASTER_ADMIN_ID)) {
+            notificationService.notifyAdminsNewProduct({
+                adminName: ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`,
+                productName: pd.name,
+                categoryName: pd.categoryId || 'Keine',
+                productId: result && result[0] ? result[0].id : 'Unbekannt',
+                time: new Date().toLocaleString('de-DE', { timeZone: 'Europe/Berlin' })
+            }).catch(() => {});
+        }
+    } catch (error) {
+        console.error('[addProductScene] Error:', error.message);
+        await ctx.reply(`⚠️ Fehler beim Speichern: ${error.message}`);
+    }
+    return ctx.scene.leave();
 }
 
 addProductScene.action('cancel_add', async (ctx) => {

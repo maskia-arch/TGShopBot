@@ -2,6 +2,12 @@ const supabase = require('../supabaseClient');
 
 async function saveFeedback(data) {
     try {
+        const alreadyDone = await hasUserAlreadyFeedbacked(data.orderId);
+        if (alreadyDone) {
+            console.warn(`[FeedbackRepo] Duplikat-Versuch blockiert für Order #${data.orderId}`);
+            return null;
+        }
+
         const { data: feedback, error } = await supabase
             .from('feedbacks')
             .insert([{
@@ -13,11 +19,10 @@ async function saveFeedback(data) {
                 is_anonymous: data.isAnonymous,
                 status: 'pending'
             }])
-            .select()
-            .single();
+            .select();
 
         if (error) throw error;
-        return feedback;
+        return Array.isArray(feedback) ? feedback[0] : feedback;
     } catch (error) {
         console.error('Error saving feedback:', error.message);
         return null;
@@ -134,12 +139,29 @@ async function deleteAllFeedbacks() {
     }
 }
 
+async function getFeedbackByOrderId(orderId) {
+    try {
+        const { data, error } = await supabase
+            .from('feedbacks')
+            .select('*')
+            .eq('order_id', orderId)
+            .maybeSingle();
+
+        if (error) throw error;
+        return data;
+    } catch (error) {
+        console.error('Error fetching feedback by order ID:', error.message);
+        return null;
+    }
+}
+
 module.exports = {
     saveFeedback,
     getApprovedFeedbacks,
     getFeedbackStats,
     updateFeedbackStatus,
     hasUserAlreadyFeedbacked,
-    deleteFeedback, // NEU EXPORTIERT
-    deleteAllFeedbacks // NEU EXPORTIERT
+    getFeedbackByOrderId,
+    deleteFeedback,
+    deleteAllFeedbacks
 };

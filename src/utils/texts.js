@@ -16,8 +16,8 @@ module.exports = {
         `Bei Fragen wende dich an den Support.`,
 
     getWelcomeText: (isMaster, role) => {
-        if (isMaster) return `👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet.`;
-        if (role === 'admin') return `🛠 *Admin-Bereich*\n\nVerwalten Sie Produkte und Kategorien.`;
+        if (isMaster) return `👑 *Master-Kontrollzentrum* (v${config.VERSION})\n\nSie sind als Systeminhaber angemeldet. Bitte wählen Sie einen Bereich:`;
+        if (role === 'admin') return `🛠 *Admin-Bereich* (v${config.VERSION})\n\nWillkommen im Admin-Panel. Bitte wählen Sie eine Aktion:`;
         return `Willkommen beim *Shop Bot*!\n\nBitte wähle eine Option aus dem Menü:`;
     },
 
@@ -71,14 +71,17 @@ module.exports = {
     getCustomerInvoice: (data) => {
         let text = `🧾 *Rechnung / Bestellbestätigung*\n\n`;
         text += `📋 *Order-ID:* \`#${data.orderId}\`\n`;
-        text += `💰 *Offener Betrag:* ${data.total}\n`;
+        text += `💶 *Euro-Betrag:* ${data.total} €\n`;
         text += `💳 *Zahlungsart:* ${data.paymentName}\n`;
         if (data.walletAddress) {
-            text += `\n📋 *Zahlungsadresse:*\n\`${data.walletAddress}\`\n_(Tippe zum Kopieren)_\n`;
+            text += `\n📍 *Zahlungsadresse:*\n\`${data.walletAddress}\`\n_(Tippe zum Kopieren)_\n`;
+        }
+        if (data.cryptoAmountFormatted) {
+            text += `\n🪙 *Exakter Krypto-Betrag (inkl. Kennziffer):*\n\`${data.cryptoAmountFormatted}\`\n_(Tippe zum Kopieren)_\n`;
         }
         if (data.deliveryMethod === 'shipping') text += `\n🚚 *Lieferung:* Versand`;
         else if (data.deliveryMethod === 'pickup') text += `\n🏪 *Lieferung:* Abholung`;
-        text += `\n\n⚠️ *Bitte überweise den offenen Betrag und bestätige anschließend deine Zahlung.*`;
+        text += `\n\n⚠️ *Bitte überweise den geforderten Betrag und bestätige anschließend deine Zahlung.*`;
         return text;
     },
 
@@ -299,6 +302,15 @@ module.exports = {
         text += `📦 Aktiv: ${product.is_active ? '✅' : '❌'}\n`;
         text += `📋 Verfügbar: ${product.is_out_of_stock ? '❌ Ausverkauft' : '✅'}\n`;
         text += `🚚 Lieferoption: ${deliveryLabel}\n`;
+        if (product.delivery_option === 'shipping' || product.delivery_option === 'both') {
+            const mode = product.kyc_mode || 'none';
+            const modeLabel = module.exports.getKycModeLabel ? module.exports.getKycModeLabel(mode) : mode;
+            let optionsText = '';
+            if (mode !== 'none' && Array.isArray(product.kyc_options) && product.kyc_options.length > 0) {
+                optionsText = ` (${product.kyc_options.map(o => module.exports.getKycTypeLabel(o)).join(', ')})`;
+            }
+            text += `🆔 KYC-Legitimierung: ${modeLabel}${optionsText}\n`;
+        }
         if (product.description) text += `\n📝 ${product.description}`;
         return text;
     },
@@ -307,10 +319,77 @@ module.exports = {
     
     getAdminPricePrompt: () => `💰 *Neuen Preis eingeben:*\n\nBitte sende den neuen Preis (z.B. \`12.50\`):`,
     
-    getAdminDeleteRequestSent: (name) => `🔔 Löschanfrage für *${name}* wurde an den Master gesendet.`,
+    getAdminDeleteRequestSent: (name) => `🔔 Löschanfrage für *${name}* me wurde an den Master gesendet.`,
 
     // NEU: Diese 3 haben in deiner Version noch gefehlt!
     getDigitalDeliverySavedButton: () => `✅ Keys gespeichert (Nachricht löschen)`,
     getDigitalDeliveryOverviewButton: () => `📥 Digitale Keys abrufen`,
-    getDigitalDeliveryOverviewHint: () => `\n_(Deine Keys können jederzeit unten über den Button "Digitale Keys abrufen" erneut angezeigt werden)_`
+    getDigitalDeliveryOverviewHint: () => `\n_(Deine Keys können jederzeit unten über den Button "Digitale Keys abrufen" erneut angezeigt werden)_`,
+
+    // KYC Helfer
+    getKycModeLabel: (mode) => {
+        const map = {
+            'none': '❌ Keins',
+            'optional': '🟡 Optional',
+            'required': '🔴 Pflicht (Verbindlich)'
+        };
+        return map[mode] || mode;
+    },
+
+    getKycTypeLabel: (type) => {
+        const map = {
+            'selfie': '📸 Selfie des Kunden',
+            'id_card': '🆔 Personalausweis / ID',
+            'selfie_with_id': '🤳 Selfie mit Ausweis',
+            'custom': '📝 Freitext / Dokument'
+        };
+        return map[type] || type;
+    },
+
+    getCheckoutKycPrompt: (kycMode, kycOption) => {
+        const isRequired = kycMode === 'required';
+        const typeLabel = module.exports.getKycTypeLabel(kycOption || 'selfie');
+        let text = `🆔 *KUNDEN-LEGITIMIERUNG (KYC)*\n\n`;
+        if (isRequired) {
+            text += `Für diesen Artikel verlangt der Shop-Betreiber eine *verbindliche Legitimierung* vor der Zustellung/Lieferung.\n\n`;
+            text += `Bitte sende jetzt ein Foto: *${typeLabel}* im Chat.`;
+        } else {
+            text += `Der Shop-Betreiber bietet für diesen Liefer-Artikel eine *optionale Legitimierung* an.\n\n`;
+            text += `Möchtest du jetzt ein Foto (*${typeLabel}*) übermitteln oder den Schritt überspringen?`;
+        }
+        return text;
+    },
+
+    getShopStatusHubText: (status, hours, absenceMsg) => {
+        let statusText = '🟢 *Shop ist Geöffnet (Rund um die Uhr)*';
+        if (status === 'closed') {
+            statusText = '🔴 *Shop ist Sofort Geschlossen (Offline-Modus)*';
+        } else if (status === 'schedule') {
+            statusText = `⏰ *Automatische Öffnungszeiten aktiv* (${hours.start} – ${hours.end} Uhr)`;
+        }
+
+        return `⚙️ *Bot-Status & Öffnungszeiten*\n\n` +
+            `📊 *Aktueller Status:* ${statusText}\n` +
+            `⏰ *Eingestellte Zeiten:* \`${hours.start} bis ${hours.end} Uhr\`\n\n` +
+            `📢 *Aktuelle Abwesenheitsnachricht:*\n` +
+            `_${absenceMsg}_\n\n` +
+            `Wähle eine Option zum Ändern des Bot-Status oder Bearbeiten der Texte:`;
+    },
+
+    getShopClosedCustomerNotice: (info) => {
+        let header = '⏰ *HINWEIS: Außerhalb der Service-Zeiten*';
+        if (info.reason === 'manual_closed') {
+            header = '🔴 *HINWEIS: Shop aktuell geschlossen*';
+        }
+
+        let hoursHint = '';
+        if (info.hours && info.status === 'schedule') {
+            hoursHint = `\n\n⏰ *Reguläre Service-Zeiten:* \`${info.hours.start} bis ${info.hours.end} Uhr\``;
+        }
+
+        return `${header}\n\n` +
+            `Du kontaktierst uns aktuell außerhalb unserer regulären Service- und Öffnungszeiten.${hoursHint}\n\n` +
+            `📢 *Abwesenheitsnachricht des Betreibers:*\n` +
+            `${info.message || 'Wir befinden uns aktuell im Feierabend. Deine Nachricht wird zu unseren Öffnungszeiten bearbeitet.'}`;
+    }
 };

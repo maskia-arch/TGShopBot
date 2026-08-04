@@ -49,7 +49,7 @@ const updateCategorySortOrder = async (id, sortOrder) => {
 const getProductsByCategory = async (categoryId, isAdmin = false) => {
     let query = supabase
         .from('products')
-        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url');
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url, kyc_mode, kyc_options');
     
     if (categoryId === null || categoryId === 'none') {
         query = query.is('category_id', null);
@@ -66,7 +66,7 @@ const getProductsByCategory = async (categoryId, isAdmin = false) => {
 const getProductsBySubcategory = async (subcategoryId, isAdmin = false) => {
     let query = supabase
         .from('products')
-        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url')
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url, kyc_mode, kyc_options')
         .eq('subcategory_id', subcategoryId);
     if (!isAdmin) query = query.eq('is_active', true);
 
@@ -86,7 +86,7 @@ const updateProductCategory = async (productId, categoryId) => {
 };
 
 const toggleProductStatus = async (productId, field, value) => {
-    const { data, error } = await supabase.from('products').update({ [field]: value }).eq('id', productId).select('id, is_active, is_out_of_stock, price, delivery_option');
+    const { data, error } = await supabase.from('products').update({ [field]: value }).eq('id', productId).select('id, is_active, is_out_of_stock, price, delivery_option, kyc_mode, kyc_options');
     if (error) throw error;
     return data[0];
 };
@@ -120,7 +120,7 @@ const getProductById = async (productId) => {
 };
 
 const addProduct = async (productData) => {
-    const { categoryId, subcategoryId, name, description, price, isUnitPrice, fileId, deliveryOption } = productData;
+    const { categoryId, subcategoryId, name, description, price, isUnitPrice, fileId, deliveryOption, kycMode, kycOptions } = productData;
     const { data, error } = await supabase
         .from('products')
         .insert([{
@@ -132,6 +132,8 @@ const addProduct = async (productData) => {
             is_unit_price: isUnitPrice,
             image_url: fileId,
             delivery_option: deliveryOption || 'none',
+            kyc_mode: kycMode || 'none',
+            kyc_options: kycOptions || [],
             is_active: true, 
             is_out_of_stock: false, 
             sort_order: 0
@@ -139,6 +141,16 @@ const addProduct = async (productData) => {
         .select('id');
     if (error) throw error;
     return data;
+};
+
+const setProductKyc = async (productId, kycMode, kycOptions) => {
+    const { data, error } = await supabase
+        .from('products')
+        .update({ kyc_mode: kycMode, kyc_options: kycOptions || [] })
+        .eq('id', productId)
+        .select('id, kyc_mode, kyc_options');
+    if (error) throw error;
+    return data[0];
 };
 
 /**
@@ -204,10 +216,24 @@ const updateProductDescription = async (productId, description) => {
     return data[0];
 };
 
+const getAllProducts = async (isAdmin = false) => {
+    let query = supabase
+        .from('products')
+        .select('id, name, price, is_active, is_out_of_stock, category_id, subcategory_id, delivery_option, sort_order, image_url, kyc_mode, kyc_options')
+        .order('name', { ascending: true });
+    
+    if (!isAdmin) query = query.eq('is_active', true);
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+};
+
 module.exports = {
     getActiveCategories, addCategory, renameCategory, deleteCategory,
     updateCategorySortOrder, getProductsByCategory, getProductsBySubcategory,
-    getProductById, addProduct, deleteProduct,
+    getProductById, addProduct, deleteProduct, getAllProducts,
     toggleProductStatus, updateProductCategory, updateProductImage, updateProductPrice,
-    updateProductName, updateProductSortOrder, setDeliveryOption, updateProductDescription
+    updateProductName, updateProductSortOrder, setDeliveryOption, updateProductDescription,
+    setProductKyc
 };

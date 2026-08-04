@@ -5,12 +5,15 @@ const texts = require('../../utils/texts');
 
 const isMasterAdmin = async (ctx, next) => {
     try {
-        if (ctx.from.id === Number(config.MASTER_ADMIN_ID)) {
+        if (!ctx.from) return;
+        const userId = ctx.from.id;
+
+        if (Number(userId) === Number(config.MASTER_ADMIN_ID)) {
             return next();
         }
         
         if (ctx.callbackQuery) {
-            return ctx.answerCbQuery('⛔ Zugriff verweigert: Master-Admin Rechte erforderlich.', { show_alert: true });
+            return ctx.answerCbQuery('⛔ Zugriff verweigert: Master-Admin Rechte erforderlich.', { show_alert: true }).catch(() => {});
         }
         return uiHelper.sendTemporary(ctx, '⛔ Zugriff verweigert: Master-Admin Rechte erforderlich.', 5);
     } catch (error) {
@@ -20,9 +23,10 @@ const isMasterAdmin = async (ctx, next) => {
 
 const isAdmin = async (ctx, next) => {
     try {
+        if (!ctx.from) return;
         const userId = ctx.from.id;
 
-        if (userId === Number(config.MASTER_ADMIN_ID)) {
+        if (Number(userId) === Number(config.MASTER_ADMIN_ID)) {
             return next();
         }
 
@@ -31,12 +35,9 @@ const isAdmin = async (ctx, next) => {
             return next();
         }
 
-        if (ctx.callbackQuery && !ctx.callbackQuery.data.startsWith('admin_')) {
-            return next();
-        }
-
+        // STRIKTER SCHUTZ: Keine Ausnahmen! Kunden erhalten niemals Admin-Rechte!
         if (ctx.callbackQuery) {
-            return ctx.answerCbQuery('🚫 Zugriff verweigert: Admin-Rechte erforderlich.', { show_alert: true });
+            return ctx.answerCbQuery('🚫 Zugriff verweigert: Admin-Rechte erforderlich.', { show_alert: true }).catch(() => {});
         }
         return uiHelper.sendTemporary(ctx, '🚫 Zugriff verweigert: Admin-Rechte erforderlich.', 5);
     } catch (error) {
@@ -52,7 +53,7 @@ const checkBan = async (ctx, next) => {
         const userId = ctx.from.id;
         
         // Master wird nie gebannt
-        if (userId === Number(config.MASTER_ADMIN_ID)) return next();
+        if (Number(userId) === Number(config.MASTER_ADMIN_ID)) return next();
         
         const banned = await userRepo.isUserBanned(userId);
         if (banned) {
@@ -69,8 +70,45 @@ const checkBan = async (ctx, next) => {
     }
 };
 
+const settingsRepo = require('../../database/repositories/settingsRepo');
+
+// Shop Status / Öffnungszeiten Middleware – wird global für Kunden-Anfragen eingesetzt
+const checkShopStatus = async (ctx, next) => {
+    try {
+        if (!ctx.from) return next();
+        const userId = ctx.from.id;
+
+        // Master-Admin und Admins werden NIEMALS durch den Offline-Status blockiert!
+        if (Number(userId) === Number(config.MASTER_ADMIN_ID)) return next();
+
+        const role = await userRepo.getUserRole(userId).catch(() => 'customer');
+        if (role === 'admin' || role === 'master') return next();
+
+        const statusInfo = await settingsRepo.isShopOpenNow();
+        if (statusInfo.open) {
+            return next();
+        }
+
+        const noticeText = texts.getShopClosedCustomerNotice ? texts.getShopClosedCustomerNotice(statusInfo) : '⏰ Der Shop ist aktuell geschlossen.';
+        const keyboard = {
+            inline_keyboard: [[{ text: '🔄 Erneut versuchen', callback_data: 'back_to_main' }]]
+        };
+
+        if (ctx.callbackQuery) {
+            ctx.answerCbQuery('⏰ Außerhalb der Service-Zeiten', { show_alert: true }).catch(() => {});
+            return await uiHelper.updateOrSend(ctx, noticeText, keyboard);
+        }
+
+        return await ctx.reply(noticeText, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {});
+    } catch (error) {
+        console.error('Shop Status Check Error:', error.message);
+        return next();
+    }
+};
+
 module.exports = {
     isMasterAdmin,
     isAdmin,
-    checkBan
+    checkBan,
+    checkShopStatus
 };

@@ -1,23 +1,13 @@
 /**
  * adminProductActions.js – v0.5.65
  * 
- * Admin-Produktverwaltung mit flicker-freier Medien-Anzeige.
- * 
- * FIX v0.5.65: Kritischer Regex-Overlap behoben!
- * ─────────────────────────────────────────────────────
- * BUG: /^admin_del_prod_(.+)$/ matchte auch "admin_del_prod_confirm_XXX"
- *      weil (.+) ALLES matcht inkl. Unterstriche.
- *      → Beide Handler feuerten gleichzeitig beim Bestätigen.
- *      → Handler 1 versuchte getProductById("confirm_XXX") → Supabase Error.
- *      → "❌ Fehler beim Löschen." wurde pro Klick 1x extra gesendet.
- * 
- * FIX: Negative Lookahead (?!confirm_) verhindert den Overlap.
- *      /^admin_del_prod_((?!confirm_).+)$/ matcht NUR echte Produkt-IDs.
+ * Admin-Produktverwaltung mit Tresor-Vorrat (Digital Inventory Stock)
  */
 
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
+const deliverableRepo = require('../../database/repositories/deliverableRepo');
 const uiHelper = require('../../utils/uiHelper');
 const { isAdmin } = require('../middlewares/auth');
 const formatters = require('../../utils/formatters');
@@ -91,19 +81,113 @@ module.exports = (bot) => {
         } catch (error) { console.error('admin_prod_subcat error:', error.message); }
     });
 
-    // ─── PRODUKT ANZEIGEN (MIT FLICKER-FREIER MEDIEN-ANZEIGE) ──────────────
+    // ─── PRODUKT ANZEIGEN (MIT FLICKER-FREIER MEDIEN-ANZEIGE & TRESOR-VORRAT) ──
     bot.action(/^admin_edit_prod_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
-            const product = await productRepo.getProductById(ctx.match[1]);
+            const productId = ctx.match[1];
+            const product = await productRepo.getProductById(productId);
             if (!product) return ctx.answerCbQuery('⚠️ Produkt nicht gefunden.', { show_alert: true });
 
+            const stockCount = await deliverableRepo.getAvailableCount(productId);
             const { deliveryLabel, text } = await buildProductText(product);
             const backCb = getBackCb(product);
-            const keyboard = adminKeyboards.getEditProductMenu(product, deliveryLabel, backCb);
+            const keyboard = adminKeyboards.getEditProductMenu(product, deliveryLabel, backCb, stockCount);
 
             await uiHelper.showProductWithMedia(ctx, product.image_url, text, keyboard);
         } catch (error) { console.error('admin_edit_prod error:', error.message); }
+    });
+
+    // ─── TRESOR-VORRAT MENÜ FÜR EIN PRODUKT ──────────────────────────────────
+    bot.action(/^admin_prod_stock_menu_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const productId = ctx.match[1];
+            const product = await productRepo.getProductById(productId);
+            if (!product) return ctx.answerCbQuery('⚠️ Produkt nicht gefunden.', { show_alert: true });
+
+            const stockCount = await deliverableRepo.getAvailableCount(productId);
+            const keyboard = adminKeyboards.getTresorStockMenu(product, stockCount);
+            const text = `🔐 *Tresor-Vorrat für "${product.name}"*\n\n` +
+                `📦 Aktueller Bestand: *${stockCount} Stück*\n\n` +
+                `Wähle eine Option zum Einlagern oder Verwalten:`;
+
+            await uiHelper.updateOrSend(ctx, text, keyboard);
+        } catch (error) { console.error('admin_prod_stock_menu error:', error.message); }
+    });
+
+    bot.action(/^admin_stock_bulk_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const productId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingBulkStock = productId;
+            await ctx.reply(`🟢 *Massen-Import für #${productId}*\n\nBitte sende jetzt die einzulagernden Einheiten als Text blockweise.\n*Jede Zeile wird als 1 separates Deliverable gespeichert.*\n\nBeispiel:\n\`KEY-1001-XXXX\`\n\`KEY-1002-YYYY\`\n\`KEY-1003-ZZZZ\``, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '🔴 ❌ Abbrechen', callback_data: `admin_prod_stock_menu_${productId}` }]] }
+            });
+        } catch (error) { console.error('admin_stock_bulk error:', error.message); }
+    });
+
+    bot.action(/^admin_stock_single_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const productId = ctx.match[1];
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingSingleStock = productId;
+            await ctx.reply(`🟢 *Einzelnes Item einlagern für #${productId}*\n\nBitte sende jetzt den Text/Code des neuen Vorrats-Items:`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '🔴 ❌ Abbrechen', callback_data: `admin_prod_stock_menu_${productId}` }]] }
+            });
+        } catch (error) { console.error('admin_stock_single error:', error.message); }
+    });
+
+    bot.action(/^admin_stock_list_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const productId = ctx.match[1];
+            const product = await productRepo.getProductById(productId);
+            const items = await deliverableRepo.getAvailableItems(productId);
+
+            if (items.length === 0) {
+                return uiHelper.updateOrSend(ctx, '📦 Keine verfügbaren Vorräte im Tresor.', {
+                    inline_keyboard: [[{ text: '🔴 🔙 Zurück', callback_data: `admin_prod_stock_menu_${productId}` }]]
+                });
+            }
+
+            let text = `📦 *Verfügbare Vorräte für ${product ? product.name : productId}* (${items.length})\n\n`;
+            const keyboard = [];
+
+            items.slice(0, 15).forEach((item, index) => {
+                const shortContent = item.content.length > 20 ? item.content.substring(0, 20) + '...' : item.content;
+                text += `${index + 1}. \`${shortContent}\`\n`;
+                keyboard.push([{ text: `🔴 🗑 Item ${index + 1} löschen`, callback_data: `admin_del_stock_item_${item.id}_${productId}` }]);
+            });
+
+            keyboard.push([{ text: '🔴 🔙 Zurück', callback_data: `admin_prod_stock_menu_${productId}` }]);
+            await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
+        } catch (error) { console.error('admin_stock_list error:', error.message); }
+    });
+
+    bot.action(/^admin_del_stock_item_([a-zA-Z0-9-]+)_([a-zA-Z0-9-]+)$/, isAdmin, async (ctx) => {
+        try {
+            const itemId = ctx.match[1];
+            const productId = ctx.match[2];
+            await deliverableRepo.deleteDeliverable(itemId);
+            ctx.answerCbQuery('🗑 Item gelöscht.').catch(() => {});
+            ctx.update.callback_query.data = `admin_stock_list_${productId}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) { console.error('admin_del_stock_item error:', error.message); }
+    });
+
+    bot.action(/^admin_stock_clear_(.+)$/, isAdmin, async (ctx) => {
+        try {
+            const productId = ctx.match[1];
+            await deliverableRepo.clearAvailableDeliverables(productId);
+            ctx.answerCbQuery('🗑 Vorrat komplett geleert!').catch(() => {});
+            ctx.update.callback_query.data = `admin_prod_stock_menu_${productId}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) { console.error('admin_stock_clear error:', error.message); }
     });
 
     // ─── PRODUKT HINZUFÜGEN ───────────────────────────────────────────────────
@@ -128,6 +212,67 @@ module.exports = (bot) => {
             ctx.update.callback_query.data = `admin_edit_prod_${product.id}`;
             return bot.handleUpdate(ctx.update);
         } catch (error) { console.error('admin_cycle_delivery error:', error.message); }
+    });
+
+    // ─── KYC LEGITIMIERUNG BEARBEITEN ─────────────────────────────────────────
+    bot.action(/^admin_edit_kyc_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const productId = ctx.match[1];
+            const product = await productRepo.getProductById(productId);
+            if (!product) return ctx.answerCbQuery('Produkt nicht gefunden.', { show_alert: true });
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '❌ Keins', callback_data: `admin_set_kycmode_none_${productId}`, style: 'primary' }],
+                    [{ text: '🟡 Optional', callback_data: `admin_set_kycmode_optional_${productId}`, style: 'primary' }],
+                    [{ text: '🔴 Pflicht (Verbindlich)', callback_data: `admin_set_kycmode_required_${productId}`, style: 'primary' }],
+                    [{ text: '🔙 Zurück zum Produkt', callback_data: `admin_edit_prod_${productId}`, style: 'danger' }]
+                ]
+            };
+            const currentMode = texts.getKycModeLabel ? texts.getKycModeLabel(product.kyc_mode || 'none') : (product.kyc_mode || 'none');
+            await uiHelper.updateOrSend(ctx, `🆔 *KYC-Legitimierung bearbeiten für "${product.name}"*\n\nAktueller Status: *${currentMode}*\n\nWähle eine Option:`, keyboard);
+        } catch (error) { console.error('admin_edit_kyc error:', error.message); }
+    });
+
+    bot.action(/^admin_set_kycmode_(none|optional|required)_(.+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const mode = ctx.match[1];
+            const productId = ctx.match[2];
+            if (mode === 'none') {
+                await productRepo.setProductKyc(productId, 'none', []);
+                ctx.update.callback_query.data = `admin_edit_prod_${productId}`;
+                return bot.handleUpdate(ctx.update);
+            }
+
+            const keyboard = {
+                inline_keyboard: [
+                    [{ text: '📸 Selfie des Kunden', callback_data: `admin_set_kyctype_selfie_${productId}_${mode}`, style: 'primary' }],
+                    [{ text: '🆔 Personalausweis / ID', callback_data: `admin_set_kyctype_idcard_${productId}_${mode}`, style: 'primary' }],
+                    [{ text: '🤳 Selfie mit Ausweis', callback_data: `admin_set_kyctype_selfieid_${productId}_${mode}`, style: 'primary' }],
+                    [{ text: '📝 Freitext / Dokument', callback_data: `admin_set_kyctype_custom_${productId}_${mode}`, style: 'primary' }],
+                    [{ text: '🔙 Zurück', callback_data: `admin_edit_kyc_${productId}`, style: 'danger' }]
+                ]
+            };
+            const modeText = texts.getKycModeLabel ? texts.getKycModeLabel(mode) : mode;
+            await uiHelper.updateOrSend(ctx, `🆔 *KYC-Typ wählen (${modeText})*\n\nWelchen Nachweis muss der Kunde einreichen?`, keyboard);
+        } catch (error) { console.error('admin_set_kycmode error:', error.message); }
+    });
+
+    bot.action(/^admin_set_kyctype_(selfie|idcard|selfieid|custom)_([a-zA-Z0-9-]+)_(optional|required)$/, isAdmin, async (ctx) => {
+        try {
+            const rawType = ctx.match[1];
+            const productId = ctx.match[2];
+            const mode = ctx.match[3];
+            const typeMap = { 'selfie': 'selfie', 'idcard': 'id_card', 'selfieid': 'selfie_with_id', 'custom': 'custom' };
+            const type = typeMap[rawType] || 'selfie';
+
+            await productRepo.setProductKyc(productId, mode, [type]);
+            ctx.answerCbQuery('✅ KYC-Einstellung gespeichert!').catch(() => {});
+            ctx.update.callback_query.data = `admin_edit_prod_${productId}`;
+            return bot.handleUpdate(ctx.update);
+        } catch (error) { console.error('admin_set_kyctype error:', error.message); }
     });
 
     // ─── AKTIV/INAKTIV TOGGLE ─────────────────────────────────────────────────
@@ -227,12 +372,7 @@ module.exports = (bot) => {
         } catch (error) { console.error('admin_sort_prod error:', error.message); }
     });
 
-    // ─── PRODUKT LÖSCHEN (FIX: Negative Lookahead gegen Regex-Overlap) ──────
-    //
-    // WICHTIG: (?!confirm_) stellt sicher, dass "admin_del_prod_confirm_XXX"
-    // NICHT von diesem Handler gefangen wird. Ohne diesen Fix feuerten BEIDE
-    // Handler gleichzeitig, was zu "Fehler beim Löschen" führte.
-    //
+    // ─── PRODUKT LÖSCHEN ──────────────────────────────────────────────────────
     bot.action(/^admin_del_prod_((?!confirm_).+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -247,7 +387,6 @@ module.exports = (bot) => {
             const backCb = getBackCb(product);
 
             if (isMaster) {
-                // Master kann direkt löschen – Bestätigungsdialog
                 await uiHelper.updateOrSend(ctx,
                     `🗑 *Produkt endgültig löschen?*\n\n📦 *${product.name}*\n\n⚠️ Diese Aktion kann nicht rückgängig gemacht werden!`,
                     {
@@ -258,11 +397,9 @@ module.exports = (bot) => {
                     }
                 );
             } else {
-                // Temporärer Admin → Anfrage an Master
                 const adminName = ctx.from.username ? `@${ctx.from.username}` : `ID: ${ctx.from.id}`;
                 const approval = await approvalRepo.createApproval(product.id, 'DELETE', null, adminName);
 
-                // Master per Direktnachricht benachrichtigen
                 await notificationService.notifyMasterProductDeleteRequest({
                     adminName,
                     productName: product.name,
@@ -281,7 +418,6 @@ module.exports = (bot) => {
         }
     });
 
-    // ─── PRODUKT LÖSCHEN BESTÄTIGEN (NUR MASTER) ─────────────────────────────
     bot.action(/^admin_del_prod_confirm_(.+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
@@ -290,15 +426,11 @@ module.exports = (bot) => {
             }
 
             const productId = ctx.match[1];
-
-            // Produkt-Info VOR dem Löschen laden (für Bestätigung + backCb)
             const product = await productRepo.getProductById(productId).catch(() => null);
             const productName = product?.name || `ID: ${productId}`;
             const backCb = product ? getBackCb(product) : 'admin_manage_products';
 
-            // Löschung durchführen
             await productRepo.deleteProduct(productId);
-
             ctx.answerCbQuery('🗑 Produkt gelöscht.').catch(() => {});
 
             await uiHelper.updateOrSend(ctx,
@@ -307,8 +439,6 @@ module.exports = (bot) => {
             );
         } catch (error) {
             console.error('[adminProductActions] admin_del_prod_confirm error:', error.message);
-            
-            // Spezifische Fehlermeldung je nach Problem
             const errMsg = (error.message || '').toLowerCase();
             if (errMsg.includes('violates foreign key') || errMsg.includes('foreign key')) {
                 await ctx.reply('❌ Produkt kann nicht gelöscht werden – es gibt noch zugehörige Bestellungen.').catch(() => {});
@@ -319,4 +449,53 @@ module.exports = (bot) => {
             }
         }
     });
+
+    // ─── MESSAGE LISTENER FÜR VORRATS-IMPORT ─────────────────────────────────
+    bot.on('message', async (ctx, next) => {
+        if (!ctx.session || !ctx.message?.text) return next();
+        const input = ctx.message.text.trim();
+
+        if (input.startsWith('/')) {
+            ctx.session.awaitingBulkStock = null;
+            ctx.session.awaitingSingleStock = null;
+            return next();
+        }
+
+        if (ctx.session.awaitingBulkStock) {
+            const productId = ctx.session.awaitingBulkStock;
+            ctx.session.awaitingBulkStock = null;
+
+            const lines = input.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            if (lines.length === 0) {
+                await ctx.reply('⚠️ Keine gültigen Zeilen gefunden.');
+                return;
+            }
+
+            try {
+                const count = await deliverableRepo.addDeliverables(productId, lines);
+                await ctx.reply(`✅ *Massen-Import erfolgreich*\n\n📦 *${count} Einheiten* wurden im Tresor-Vorrat eingelagert.`, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Bulk stock error:', error.message);
+                await ctx.reply(`❌ Fehler beim Einlagern: ${error.message}`);
+            }
+            return;
+        }
+
+        if (ctx.session.awaitingSingleStock) {
+            const productId = ctx.session.awaitingSingleStock;
+            ctx.session.awaitingSingleStock = null;
+
+            try {
+                const count = await deliverableRepo.addDeliverables(productId, [input]);
+                await ctx.reply(`✅ *Item eingelagert*\n\n1 Einheit wurde im Tresor-Vorrat hinterlegt.`, { parse_mode: 'Markdown' });
+            } catch (error) {
+                console.error('Single stock error:', error.message);
+                await ctx.reply(`❌ Fehler beim Einlagern: ${error.message}`);
+            }
+            return;
+        }
+
+        return next();
+    });
+
 };

@@ -48,8 +48,22 @@ const sendOrderReceipt = async (userId, data) => {
 };
 
 const notifyCustomerStatusUpdate = async (userId, orderId, newStatus) => {
-    const text = texts.getStatusUpdateText(orderId, newStatus);
-    return sendTo(userId, text);
+    try {
+        const order = await orderRepo.getOrderByOrderId(orderId).catch(() => null);
+        let text = texts.getStatusUpdateText(orderId, newStatus);
+        const keyboard = { inline_keyboard: [] };
+
+        if (order && order.digital_delivery) {
+            text += `\n\n🔐 *Gelieferte Artikel / Keys:*\n${order.digital_delivery}`;
+            keyboard.inline_keyboard.push([{ text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}`, style: 'primary' }]);
+        }
+
+        keyboard.inline_keyboard.push([{ text: '📋 Bestellung anzeigen', callback_data: `cust_order_detail_${orderId}`, style: 'primary' }]);
+        return sendTo(userId, text, { reply_markup: keyboard });
+    } catch (e) {
+        console.error('notifyCustomerStatusUpdate error:', e.message);
+        return sendTo(userId, texts.getStatusUpdateText(orderId, newStatus));
+    }
 };
 
 const notifyAdminsInterest = async (data) => {
@@ -77,7 +91,7 @@ const notifyAdminsNewOrder = async (data) => {
         });
 
         const keyboard = {
-            inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]]
+            inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}`, style: 'primary' }]]
         };
 
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
@@ -109,8 +123,8 @@ const notifyAdminsTxId = async (data) => {
         const text = texts.getAdminTxIdNotify(safeData);
         const keyboard = {
             inline_keyboard: [
-                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${safeData.orderId}` }],
-                [{ text: '✅ Zahlung bestätigen', callback_data: `ostatus_${safeData.orderId}_in_bearbeitung` }]
+                [{ text: '📋 Bestellung öffnen', callback_data: `oview_${safeData.orderId}`, style: 'primary' }],
+                [{ text: '✅ Zahlung bestätigen', callback_data: `ostatus_${safeData.orderId}_in_bearbeitung`, style: 'success' }]
             ]
         };
 
@@ -118,8 +132,12 @@ const notifyAdminsTxId = async (data) => {
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
         targetIds.add(String(config.MASTER_ADMIN_ID));
 
-        if (order && order.notification_msg_ids && order.notification_msg_ids.length > 0) {
-            for (const notif of order.notification_msg_ids) {
+        const adminNotifs = (order && order.notification_msg_ids)
+            ? order.notification_msg_ids.filter(n => targetIds.has(String(n.chat_id)))
+            : [];
+
+        if (adminNotifs.length > 0) {
+            for (const notif of adminNotifs) {
                 editAdminMessage(notif.chat_id, notif.message_id, text, { reply_markup: keyboard })
                     .then(res => {
                         if (!res) sendTo(notif.chat_id, text, { reply_markup: keyboard });
@@ -142,8 +160,8 @@ const notifyAdminsPing = async (data) => {
     try {
         const text = texts.getAdminPingNotify(data);
         const keyboard = { inline_keyboard: [
-            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
+            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}`, style: 'primary' }],
+            [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}`, style: 'primary' }]
         ]};
         const admins = await userRepo.getAllAdmins();
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
@@ -158,8 +176,8 @@ const notifyAdminsContact = async (data) => {
     try {
         const text = texts.getAdminContactNotify(data);
         const keyboard = { inline_keyboard: [
-            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}` }]
+            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}`, style: 'primary' }],
+            [{ text: '📋 Bestellung öffnen', callback_data: `oview_${data.orderId}`, style: 'primary' }]
         ]};
         const admins = await userRepo.getAllAdmins();
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
@@ -174,8 +192,8 @@ const notifyMasterBan = async (data) => {
     try {
         const text = texts.getMasterBanNotify(data);
         const keyboard = { inline_keyboard: [
-            [{ text: '↩️ Ban aufheben', callback_data: `master_revert_ban_${data.banId}` }],
-            [{ text: '✅ Sofort bestätigen', callback_data: `master_confirm_ban_${data.banId}` }]
+            [{ text: '↩️ Ban aufheben', callback_data: `master_revert_ban_${data.banId}`, style: 'danger' }],
+            [{ text: '✅ Sofort bestätigen', callback_data: `master_confirm_ban_${data.banId}`, style: 'success' }]
         ]};
         sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard });
     } catch (error) { console.error(error.message); }
@@ -196,11 +214,21 @@ const sendBroadcast = async (text, adminId) => {
 
 const notifyCustomerFeedbackInvite = async (userId, orderId) => {
     try {
-        const text = texts.getFeedbackInviteText(orderId);
-        const keyboard = {
-            inline_keyboard: [[{ text: '⭐ Feedback abgeben', callback_data: `start_feedback_${orderId}` }]]
-        };
-        await sendTo(userId, text, { reply_markup: keyboard });
+        const order = await orderRepo.getOrderByOrderId(orderId).catch(() => null);
+        let text = texts.getFeedbackInviteText(orderId);
+        const keyboard = { inline_keyboard: [] };
+
+        if (order && order.digital_delivery) {
+            text += `\n\n🔐 *Gelieferte Artikel / Keys:*\n${order.digital_delivery}`;
+            keyboard.inline_keyboard.push([{ text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}`, style: 'primary' }]);
+        }
+
+        keyboard.inline_keyboard.push([{ text: '⭐ Feedback abgeben', callback_data: `start_feedback_${orderId}`, style: 'success' }]);
+        keyboard.inline_keyboard.push([{ text: '📋 Bestellung anzeigen', callback_data: `cust_order_detail_${orderId}`, style: 'primary' }]);
+
+        // Dauerhafte Benachrichtigung – KEIN Selbstlöschungs-Timer!
+        const sentMsg = await sendTo(userId, text, { reply_markup: keyboard });
+        return sentMsg;
     } catch (error) { console.error(error.message); }
 };
 
@@ -209,8 +237,8 @@ const notifyAdminNewFeedback = async (data) => {
         const text = texts.getAdminFeedbackReviewNotify(data);
         const keyboard = {
             inline_keyboard: [
-                [{ text: '✅ Freigeben', callback_data: `fb_approve_${data.feedbackId}` },
-                 { text: '❌ Ablehnen', callback_data: `fb_reject_${data.feedbackId}` }]
+                [{ text: '✅ Freigeben', callback_data: `fb_approve_${data.feedbackId}`, style: 'success' },
+                 { text: '❌ Ablehnen', callback_data: `fb_reject_${data.feedbackId}`, style: 'danger' }]
             ]
         };
         const admins = await userRepo.getAllAdmins();
@@ -226,10 +254,10 @@ const notifyAdminOrderDeleteRequest = async (data) => {
     try {
         const text = texts.getAdminOrderDeleteRequest(data);
         const keyboard = { inline_keyboard: [
-            [{ text: '✅ Löschung zustimmen', callback_data: `cust_del_approve_${data.orderId}` }],
-            [{ text: '❌ Ablehnen & Wiederherstellen', callback_data: `cust_del_reject_${data.orderId}` }],
-            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }],
-            [{ text: '📋 Bestellung prüfen', callback_data: `oview_${data.orderId}` }]
+            [{ text: '✅ Löschung zustimmen', callback_data: `cust_del_approve_${data.orderId}`, style: 'success' }],
+            [{ text: '❌ Ablehnen & Wiederherstellen', callback_data: `cust_del_reject_${data.orderId}`, style: 'danger' }],
+            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}`, style: 'primary' }],
+            [{ text: '📋 Bestellung prüfen', callback_data: `oview_${data.orderId}`, style: 'primary' }]
         ]};
         const admins = await userRepo.getAllAdmins();
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
@@ -245,8 +273,8 @@ const notifyAdminReplaceRequest = async (data) => {
     try {
         const text = texts.getAdminReplaceRequest(data);
         const keyboard = { inline_keyboard: [
-            [{ text: '📋 Bestellung prüfen', callback_data: `oview_${data.orderId}` }],
-            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}` }]
+            [{ text: '📋 Bestellung prüfen', callback_data: `oview_${data.orderId}`, style: 'primary' }],
+            [{ text: '👤 Kontaktieren', url: `tg://user?id=${data.userId}`, style: 'primary' }]
         ]};
         const admins = await userRepo.getAllAdmins();
         const targetIds = new Set(admins.map(a => String(a.telegram_id)));
@@ -266,8 +294,8 @@ const notifyMasterProductDeleteRequest = async (data) => {
             `Soll dieses Produkt endgültig gelöscht werden?`;
         const keyboard = {
             inline_keyboard: [
-                [{ text: '✅ Löschen genehmigen', callback_data: `master_approve_${data.approvalId}` }],
-                [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${data.approvalId}` }]
+                [{ text: '✅ Löschen genehmigen', callback_data: `master_approve_${data.approvalId}`, style: 'success' }],
+                [{ text: '❌ Ablehnen', callback_data: `master_reject_appr_${data.approvalId}`, style: 'danger' }]
             ]
         };
         await sendTo(config.MASTER_ADMIN_ID, text, { reply_markup: keyboard });

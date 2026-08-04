@@ -16,7 +16,7 @@ module.exports = (bot) => {
             
             if (!cartItems || cartItems.length === 0) {
                 return uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
-                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                    inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu', style: 'danger' }]]
                 });
             }
 
@@ -26,14 +26,14 @@ module.exports = (bot) => {
             cartItems.forEach((item, index) => {
                 text += `${index + 1}. *${item.name}*\n`;
                 text += `Menge: ${item.quantity} | Preis: ${parseFloat(item.total).toFixed(2)}€\n\n`;
-                keyboard.push([{ text: `❌ ${item.name} entfernen`, callback_data: `remove_item_${item.id}` }]);
+                keyboard.push([{ text: `❌ ${item.name} entfernen`, callback_data: `remove_item_${item.id}`, style: 'danger' }]);
             });
 
             text += `💰 *Gesamtsumme: ${parseFloat(cartTotal).toFixed(2)}€*`;
 
-            keyboard.push([{ text: '💳 Zur Kasse gehen', callback_data: 'checkout' }]);
-            keyboard.push([{ text: '🗑 Kompletten Warenkorb leeren', callback_data: 'clear_cart' }]);
-            keyboard.push([{ text: '🛍 Weiter einkaufen', callback_data: 'shop_menu' }]);
+            keyboard.push([{ text: '💳 Zur Kasse gehen', callback_data: 'checkout', style: 'success' }]);
+            keyboard.push([{ text: '🗑 Kompletten Warenkorb leeren', callback_data: 'clear_cart', style: 'danger' }]);
+            keyboard.push([{ text: '🛍 Weiter einkaufen', callback_data: 'shop_menu', style: 'primary' }]);
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) {
@@ -63,7 +63,7 @@ module.exports = (bot) => {
             ctx.answerCbQuery('🧹 Warenkorb geleert!').catch(() => {});
             
             await uiHelper.updateOrSend(ctx, texts.getCartEmptyText(), {
-                inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu' }]]
+                inline_keyboard: [[{ text: '🔙 Zurück zum Shop', callback_data: 'shop_menu', style: 'danger' }]]
             });
         } catch (error) {
             console.error('Cart Clear Error:', error.message);

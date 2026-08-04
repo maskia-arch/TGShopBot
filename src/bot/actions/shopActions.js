@@ -1,13 +1,25 @@
 /**
- * shopActions.js – v0.5.64
+ * shopActions.js – v0.5.65
  * 
- * Shop-Aktionen mit flicker-freier Medien-Anzeige via editMessageMedia.
- * Verwendet showProductWithMedia für intelligente Media/Text-Übergänge.
+ * Shop-Aktionen mit Telegram Bot API nativen Button-Hintergrundfarben (style: primary, success, danger).
  */
 
 const productRepo = require('../../database/repositories/productRepo');
 const subcategoryRepo = require('../../database/repositories/subcategoryRepo');
 const orderRepo = require('../../database/repositories/orderRepo');
+const settingsRepo = require('../../database/repositories/settingsRepo');
+const deliverableRepo = require('../../database/repositories/deliverableRepo');
+
+const buildProductLabel = async (p, showExactStock) => {
+    if (p.is_out_of_stock) {
+        return `❌ ${p.name} (${formatters.formatPrice(p.price)})`;
+    }
+    const count = await deliverableRepo.getAvailableCount(p.id).catch(() => 0);
+    if (showExactStock && count > 0) {
+        return `${p.name} – ${formatters.formatPrice(p.price)} [${count} auf Lager]`;
+    }
+    return `${p.name} – ${formatters.formatPrice(p.price)}`;
+};
 const userRepo = require('../../database/repositories/userRepo');
 const uiHelper = require('../../utils/uiHelper');
 const formatters = require('../../utils/formatters');
@@ -41,17 +53,7 @@ module.exports = (bot) => {
                 keyboard = customerMenu(hasOrders);
             }
 
-            // Zurück zum Hauptmenü → immer Text (löscht Media-Nachricht falls nötig)
-            if (ctx.callbackQuery?.message) {
-                const hasMedia = !!(ctx.callbackQuery.message.photo || ctx.callbackQuery.message.animation || ctx.callbackQuery.message.video);
-                if (hasMedia) {
-                    await ctx.deleteMessage().catch(() => {});
-                    await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-                    return;
-                }
-            }
-            await ctx.deleteMessage().catch(() => {});
-            await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
+            await uiHelper.updateOrSend(ctx, text, keyboard);
         } catch (error) {
             console.error('Back to Main Error:', error.message);
         }
@@ -61,7 +63,7 @@ module.exports = (bot) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             await uiHelper.updateOrSend(ctx, texts.getHelpText(), {
-                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]]
+                inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main', style: 'danger' }]]
             });
         } catch (error) { console.error(error.message); }
     });
@@ -74,12 +76,12 @@ module.exports = (bot) => {
             
             if (!categories || categories.length === 0) {
                 const emptyText = '🛍 *Shop*\n\nDerzeit sind keine Produkte verfügbar.';
-                const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main' }]] };
+                const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'back_to_main', style: 'danger' }]] };
                 return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
             }
 
-            const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `category_${c.id}` }]));
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'back_to_main' }]);
+            const keyboard = categories.map(c => ([{ text: `📁 ${c.name}`, callback_data: `category_${c.id}`, style: 'primary' }]));
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'back_to_main', style: 'danger' }]);
 
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
@@ -90,30 +92,31 @@ module.exports = (bot) => {
         try {
             const categoryId = ctx.match[1];
             const subcats = await subcategoryRepo.getSubcategoriesByCategory(categoryId).catch(() => []);
+            const showExactStock = await settingsRepo.isShowExactStock();
             let keyboard = [];
             const text = 'Wähle eine Option:';
 
             if (subcats.length > 0) {
-                subcats.forEach(sc => keyboard.push([{ text: `📂 ${sc.name}`, callback_data: `subcategory_${sc.id}` }]));
+                subcats.forEach(sc => keyboard.push([{ text: `📂 ${sc.name}`, callback_data: `subcategory_${sc.id}`, style: 'primary' }]));
                 const uncategorized = await productRepo.getProductsByCategory(categoryId, false);
                 const noSubcatProducts = uncategorized.filter(p => !p.subcategory_id);
-                noSubcatProducts.forEach(p => {
-                    let label = p.is_out_of_stock ? `❌ ${p.name}` : p.name;
-                    keyboard.push([{ text: `${label} – ${formatters.formatPrice(p.price)}`, callback_data: `product_${p.id}` }]);
-                });
+                for (const p of noSubcatProducts) {
+                    const label = await buildProductLabel(p, showExactStock);
+                    keyboard.push([{ text: label, callback_data: `product_${p.id}`, style: 'primary' }]);
+                }
             } else {
                 const products = await productRepo.getProductsByCategory(categoryId, false);
                 if (!products || products.length === 0) {
                     const emptyText = 'Diese Kategorie ist aktuell leer.';
-                    const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'shop_menu' }]] };
+                    const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'shop_menu', style: 'danger' }]] };
                     return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
                 }
-                products.forEach(p => {
-                    let label = p.is_out_of_stock ? `❌ ${p.name}` : p.name;
-                    keyboard.push([{ text: `${label} – ${formatters.formatPrice(p.price)}`, callback_data: `product_${p.id}` }]);
-                });
+                for (const p of products) {
+                    const label = await buildProductLabel(p, showExactStock);
+                    keyboard.push([{ text: label, callback_data: `product_${p.id}`, style: 'primary' }]);
+                }
             }
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu' }]);
+            keyboard.push([{ text: '🔙 Zurück', callback_data: 'shop_menu', style: 'danger' }]);
             
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
@@ -125,31 +128,35 @@ module.exports = (bot) => {
             const subcatId = ctx.match[1];
             const subcat = await subcategoryRepo.getSubcategoryById(subcatId);
             const products = await productRepo.getProductsBySubcategory(subcatId, false);
+            const showExactStock = await settingsRepo.isShowExactStock();
             const backCb = subcat ? `category_${subcat.category_id}` : 'shop_menu';
 
             if (!products || products.length === 0) {
                 const emptyText = 'Keine Produkte verfügbar.';
-                const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: backCb }]] };
+                const emptyKb = { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: backCb, style: 'danger' }]] };
                 return await uiHelper.updateOrSend(ctx, emptyText, emptyKb);
             }
 
-            const keyboard = products.map(p => {
-                let label = p.is_out_of_stock ? `❌ ${p.name}` : p.name;
-                return [{ text: `${label} – ${formatters.formatPrice(p.price)}`, callback_data: `product_${p.id}` }];
-            });
-            keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
+            const keyboard = [];
+            for (const p of products) {
+                const label = await buildProductLabel(p, showExactStock);
+                keyboard.push([{ text: label, callback_data: `product_${p.id}`, style: 'primary' }]);
+            }
+            keyboard.push([{ text: '🔙 Zurück', callback_data: backCb, style: 'danger' }]);
             
             const title = `📂 *${subcat ? subcat.name : ''}*`;
             await uiHelper.updateOrSend(ctx, title, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
 
-    // ─── PRODUKT-DETAIL MIT INTELLIGENTER MEDIEN-ANZEIGE ───────────────────
     bot.action(/^product_(.+)$/, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const product = await productRepo.getProductById(ctx.match[1]);
             if (!product) return;
+
+            const showExactStock = await settingsRepo.isShowExactStock();
+            const stockCount = await deliverableRepo.getAvailableCount(product.id).catch(() => 0);
 
             let path = '';
             try {
@@ -167,6 +174,13 @@ module.exports = (bot) => {
             let text = `*${product.name}*\n`;
             if (path) text += `_In: ${path}_\n`;
             text += `\n💰 ${formatters.formatPrice(product.price)}`;
+
+            if (showExactStock) {
+                text += `\n📦 Vorrat: ${stockCount > 0 ? `${stockCount} auf Lager` : 'Ausverkauft'}`;
+            } else {
+                text += `\n📦 Status: ${stockCount > 0 && !product.is_out_of_stock ? 'Verfügbar ✅' : 'Ausverkauft ❌'}`;
+            }
+
             if (product.description) text += `\n\n📝 ${product.description}`;
             
             const backCb = product.subcategory_id 
@@ -175,13 +189,12 @@ module.exports = (bot) => {
             
             const keyboard = { inline_keyboard: [] };
             if (!product.is_out_of_stock) {
-                keyboard.inline_keyboard.push([{ text: '🛒 In den Warenkorb', callback_data: `add_to_cart_${product.id}` }]);
+                keyboard.inline_keyboard.push([{ text: '🛒 In den Warenkorb', callback_data: `add_to_cart_${product.id}`, style: 'success' }]);
             } else {
-                keyboard.inline_keyboard.push([{ text: '❌ Ausverkauft', callback_data: 'noop' }]);
+                keyboard.inline_keyboard.push([{ text: '❌ Ausverkauft', callback_data: 'noop', style: 'danger' }]);
             }
-            keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb }]);
+            keyboard.inline_keyboard.push([{ text: '🔙 Zurück', callback_data: backCb, style: 'danger' }]);
 
-            // Intelligente Media-Anzeige: editMessageMedia wenn möglich, sonst delete+send
             await uiHelper.showProductWithMedia(ctx, product.image_url, text, keyboard);
         } catch (error) { console.error(error.message); }
     });
@@ -218,7 +231,7 @@ module.exports = (bot) => {
     bot.action('master_info', async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         await uiHelper.updateOrSend(ctx, texts.getMasterInfoText(), 
-            { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel' }]] });
+            { inline_keyboard: [[{ text: '🔙 Zurück', callback_data: 'master_panel', style: 'danger' }]] });
     });
 
     bot.action('noop', async (ctx) => {

@@ -66,8 +66,8 @@ const editPriceScene = new Scenes.WizardScene(
         }
 
         const newPrice = parseFloat(input.replace(',', '.'));
-        if (isNaN(newPrice) || newPrice <= 0) {
-            const errorMsg = await ctx.reply('⚠️ Ungültiger Preis. Bitte eine Zahl wie z.B. 12.99 eingeben:', {
+        if (isNaN(newPrice) || !Number.isFinite(newPrice) || newPrice <= 0 || newPrice > 100000) {
+            const errorMsg = await ctx.reply('⚠️ Ungültiger Preis. Bitte eine Zahl zwischen 0.01 € und 100.000 € eingeben (z.B. 12.99):', {
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_scene' }]]
                 }

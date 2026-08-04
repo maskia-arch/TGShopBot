@@ -35,7 +35,9 @@ module.exports = (bot) => {
                     }]);
                 });
             }
-            keyboard.push([{ text: '🔙 Zurück', callback_data: 'admin_panel' }]);
+            const isMaster = ctx.from.id === Number(config.MASTER_ADMIN_ID);
+            const backCb = isMaster ? 'master_orders_hub' : 'admin_panel';
+            keyboard.push([{ text: '🔙 Zurück', callback_data: backCb, style: 'danger' }]);
             await uiHelper.updateOrSend(ctx, text, { inline_keyboard: keyboard });
         } catch (error) { console.error(error.message); }
     });
@@ -52,6 +54,33 @@ module.exports = (bot) => {
 
             await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
         } catch (error) { console.error(error.message); }
+    });
+
+    bot.action(/^admin_view_kyc_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (!order || !order.kyc_submission || !order.kyc_submission.fileId) {
+                return ctx.reply('⚠️ Keine KYC-Einsendung für diese Bestellung vorhanden.');
+            }
+
+            const kyc = order.kyc_submission;
+            const caption = `🆔 *KYC-Legitimierung für Bestellung #${order.order_id}*\n\n` +
+                `👤 Kunde ID: \`${order.user_id}\`\n` +
+                `📋 Modus: ${kyc.mode || 'verbindlich'}\n` +
+                `📸 Nachweis: ${kyc.option || 'selfie'}\n` +
+                `⏰ Eingereicht: ${kyc.submittedAt ? new Date(kyc.submittedAt).toLocaleString('de-DE') : 'Unbekannt'}`;
+
+            const keyboard = {
+                inline_keyboard: [[{ text: '🔙 Zurück zur Bestellung', callback_data: `oview_${order.order_id}`, style: 'danger' }]]
+            };
+
+            await uiHelper.showProductWithMedia(ctx, kyc.fileId, caption, keyboard);
+        } catch (error) {
+            console.error('admin_view_kyc error:', error.message);
+            await ctx.reply(`⚠️ Fehler beim Laden der KYC-Einsendung: ${error.message}`);
+        }
     });
 
     bot.action(/^ostatus_([a-zA-Z0-9]+)_(.+)$/, isAdmin, async (ctx) => {
@@ -93,7 +122,71 @@ module.exports = (bot) => {
         } catch (e) { console.error(e); }
     });
 
-    bot.action(/^odeliv_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+    // ─── AUTOMATISCHE TRESOR-AUSLIEFERUNG (AUS DEM VORRAT) ───────────────────
+    bot.action(/^odeliv_vault_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        try {
+            const orderId = ctx.match[1];
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (!order) return ctx.answerCbQuery('Bestellung nicht gefunden.', { show_alert: true });
+
+            if (!order.details || order.details.length === 0) {
+                return ctx.answerCbQuery('Keine Artikel in der Bestellung.', { show_alert: true });
+            }
+
+            // 1. Vorrats-Prüfung für alle enthaltenen Artikel
+            for (const item of order.details) {
+                const prodId = item.product_id || item.id;
+                const count = await deliverableRepo.getAvailableCount(prodId);
+                const needed = item.quantity || 1;
+
+                if (count < needed) {
+                    return ctx.answerCbQuery(`⚠️ Kein ausreichender Vorrat für "${item.name}" (${count}/${needed} verfügbar). Bitte Vorrat auffüllen oder manuell eingeben.`, { show_alert: true });
+                }
+            }
+
+            // 2. Atomare Entnahme aus dem Tresor-Vorrat
+            const allDeliveredLines = [];
+            for (const item of order.details) {
+                const prodId = item.product_id || item.id;
+                const needed = item.quantity || 1;
+                const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
+                
+                if (!result.success) {
+                    return ctx.answerCbQuery(`❌ Fehler beim Entnehmen aus dem Vorrat.`, { show_alert: true });
+                }
+                allDeliveredLines.push(...result.items);
+            }
+
+            const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
+            const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
+
+            const tresorKeyboard = {
+                inline_keyboard: [[
+                    { text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }
+                ]]
+            };
+
+            const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
+
+            if (sentMsg) {
+                await orderRepo.setDigitalDelivery(orderId, formattedContent);
+                await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+                await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Automatisch aus Tresor-Vorrat geliefert (${allDeliveredLines.length} Items).`);
+                
+                ctx.answerCbQuery('🟢 ✅ Aus dem Tresor geliefert!').catch(() => {});
+                
+                const payload = await orderHelper.buildOrderViewPayload(await orderRepo.getOrderByOrderId(orderId));
+                await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
+            } else {
+                ctx.answerCbQuery('❌ Kunde konnte nicht benachrichtigt werden.', { show_alert: true }).catch(() => {});
+            }
+        } catch (error) {
+            console.error('odeliv_vault error:', error.message);
+            ctx.answerCbQuery(`❌ Fehler: ${error.message}`, { show_alert: true }).catch(() => {});
+        }
+    });
+
+    bot.action(/^odeliv_(?:manual_)?([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
@@ -101,7 +194,7 @@ module.exports = (bot) => {
             ctx.session.awaitingDigitalDelivery = orderId;
             await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
                 parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: [[{ text: '❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
+                reply_markup: { inline_keyboard: [[{ text: '🔴 ❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
             });
         } catch (error) { console.error(error.message); }
     });

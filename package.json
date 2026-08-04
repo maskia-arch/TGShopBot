@@ -6,8 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/index.js",
-    "start:local": "node -r dotenv/config src/index.js",
-    "dev": "nodemon -r dotenv/config src/index.js"
+    "start:local": "node src/index.js",
+    "dev": "nodemon src/index.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
