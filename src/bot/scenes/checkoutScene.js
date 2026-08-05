@@ -357,8 +357,10 @@ async function finalizeOrder(ctx) {
 
         if (!orderDetails || orderDetails.length === 0) return ctx.scene.leave();
 
-        // Vorrats- & Status-Guard: Verhindert Käufe ausverkaufter oder deaktivierter Produkte
+        // Vorrats- & Status-Guard: Verhindert Käufe ausverkaufter oder unzureichender Produkte
         const productRepo = require('../../database/repositories/productRepo');
+        const deliverableRepo = require('../../database/repositories/deliverableRepo');
+
         for (const item of orderDetails) {
             const prodId = item.product_id || item.id;
             const product = await productRepo.getProductById(prodId).catch(() => null);
@@ -368,9 +370,20 @@ async function finalizeOrder(ctx) {
                 });
                 return ctx.scene.leave();
             }
-            if (product.is_out_of_stock) {
-                await ctx.reply(`⚠️ Das Produkt "${item.name}" ist derzeit ausverkauft.`, {
+
+            const availCount = await deliverableRepo.getAvailableCount(prodId);
+            if (product.is_out_of_stock || (availCount === 0 && (product.delivery_option === 'none' || !product.delivery_option))) {
+                await productRepo.toggleProductStatus(prodId, 'is_out_of_stock', true).catch(() => {});
+                await ctx.reply(`⚠️ Das Produkt "${item.name}" ist derzeit leider ausverkauft.`, {
                     reply_markup: { inline_keyboard: [[{ text: '🛍 Zum Shop', callback_data: 'shop_menu' }]] }
+                });
+                return ctx.scene.leave();
+            }
+
+            if (availCount > 0 && item.quantity > availCount) {
+                await ctx.reply(`⚠️ *Vorrat nicht ausreichend für "${item.name}"*\n\nDerzeit sind nur noch *${availCount} Stück* im Tresor auf Lager.\n(Gewünschte Menge: ${item.quantity} Stück)\n\nBitte passe deine Menge im Warenkorb an.`, {
+                    parse_mode: 'Markdown',
+                    reply_markup: { inline_keyboard: [[{ text: '🛒 Zum Warenkorb', callback_data: 'cart_view' }]] }
                 });
                 return ctx.scene.leave();
             }

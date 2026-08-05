@@ -25,7 +25,13 @@ const deliverableRepo = {
             .select();
 
         if (error) throw new Error(`Fehler beim Speichern der Vorräte: ${error.message}`);
-        return data ? data.length : records.length;
+        
+        const count = data ? data.length : records.length;
+        if (count > 0) {
+            const productRepo = require('./productRepo');
+            await productRepo.toggleProductStatus(productId, 'is_out_of_stock', false).catch(() => {});
+        }
+        return count;
     },
 
     /**
@@ -58,38 +64,42 @@ const deliverableRepo = {
     },
 
     /**
-     * ATOMAR & MANIPULATIONSSICHER: Entnimmt 'count' verfügbare Items aus dem Vorrat,
-     * markiert sie als 'delivered' für die Bestellung/Nutzer und gibt den Inhalt zurück.
+     * ATOMAR, LÖSCHEND & MANIPULATIONSSICHER:
+     * Entnimmt 'count' verfügbare Items aus dem Vorrat, LÖSCHT sie sofort aus dem Tresor
+     * (damit sie niemals doppelt versendet werden können) und gibt den Inhalt zurück.
      */
     async popAvailableDeliverables(productId, count, orderId, userId) {
         const available = await this.getAvailableItems(productId);
         if (available.length < count) {
-            return { success: false, needed: count, available: available.length };
+            return { success: false, needed: count, available: available.length, items: available.map(i => i.content) };
         }
 
         const selected = available.slice(0, count);
         const deliveredItems = [];
 
         for (const item of selected) {
+            // Atomares Löschen: Garantiert, dass nur existierende "available" Items entnommen & purged werden!
             const { data, error } = await supabase
                 .from('product_deliverables')
-                .update({
-                    status: 'delivered',
-                    order_id: String(orderId),
-                    delivered_to: userId,
-                    delivered_at: new Date().toISOString()
-                })
+                .delete()
                 .eq('id', item.id)
-                .eq('status', 'available') // Strikter Optimistic Locking Guard gegen Doppel-Auslieferung!
+                .eq('status', 'available')
                 .select();
 
             if (error || !data || data.length === 0) {
-                throw new Error(`Konflikt bei der Entnahme von Item ${item.id}. Aktion abgebrochen.`);
+                throw new Error(`Konflikt bei der Entnahme von Item ${item.id} (bereits entnommen). Aktion abgebrochen.`);
             }
             deliveredItems.push(item.content);
         }
 
-        return { success: true, items: deliveredItems };
+        // Nach Entnahme Bestand prüfen & ggf. Status "ausverkauft" setzen
+        const remainingCount = await this.getAvailableCount(productId);
+        if (remainingCount === 0) {
+            const productRepo = require('./productRepo');
+            await productRepo.toggleProductStatus(productId, 'is_out_of_stock', true).catch(() => {});
+        }
+
+        return { success: true, items: deliveredItems, remainingCount };
     },
 
     /**

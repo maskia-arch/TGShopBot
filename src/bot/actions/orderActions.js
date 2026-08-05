@@ -2,6 +2,7 @@ const orderRepo = require('../../database/repositories/orderRepo');
 const approvalRepo = require('../../database/repositories/approvalRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const feedbackRepo = require('../../database/repositories/feedbackRepo'); 
+const deliverableRepo = require('../../database/repositories/deliverableRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const orderHelper = require('../../utils/orderHelper'); 
@@ -122,74 +123,144 @@ module.exports = (bot) => {
         } catch (e) { console.error(e); }
     });
 
-    // ─── AUTOMATISCHE TRESOR-AUSLIEFERUNG (AUS DEM VORRAT) ───────────────────
+    // Hilfsfunktion: Führe Tresor-Auslieferung durch & deaktiviere Auto-Delivery
+    const executeVaultDelivery = async (ctx, order) => {
+        const orderId = order.order_id;
+        
+        if (!order.details || order.details.length === 0) {
+            return ctx.answerCbQuery('Keine Artikel in der Bestellung.', { show_alert: true });
+        }
+
+        // 1. Vorrats-Prüfung für alle Artikel
+        for (const item of order.details) {
+            const prodId = item.product_id || item.id;
+            const count = await deliverableRepo.getAvailableCount(prodId);
+            const needed = item.quantity || 1;
+
+            if (count < needed) {
+                return ctx.answerCbQuery(`⚠️ Kein ausreichender Vorrat für "${item.name}" (${count}/${needed} verfügbar). Bitte Vorrat auffüllen.`, { show_alert: true });
+            }
+        }
+
+        // 2. Auto-Delivery in DB deaktivieren (Race-Condition Guard)
+        await orderRepo.disableAutoDelivery(orderId);
+
+        // 3. Atomare Entnahme & PURGE aus dem Tresor-Vorrat
+        const allDeliveredLines = [];
+        for (const item of order.details) {
+            const prodId = item.product_id || item.id;
+            const needed = item.quantity || 1;
+            const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
+            
+            if (!result.success) {
+                return ctx.answerCbQuery(`❌ Fehler bei der Entnahme aus dem Vorrat.`, { show_alert: true });
+            }
+            allDeliveredLines.push(...result.items);
+        }
+
+        const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
+        const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
+
+        const tresorKeyboard = {
+            inline_keyboard: [[
+                { text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }
+            ]]
+        };
+
+        const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
+
+        if (sentMsg) {
+            await orderRepo.setDigitalDelivery(orderId, formattedContent);
+            await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+            await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Aus Tresor geliefert (${allDeliveredLines.length} Items). Auto-Scan gestoppt.`);
+            
+            ctx.answerCbQuery('🟢 ✅ Aus dem Tresor geliefert!').catch(() => {});
+            
+            const payload = await orderHelper.buildOrderViewPayload(await orderRepo.getOrderByOrderId(orderId));
+            await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
+        } else {
+            ctx.answerCbQuery('❌ Kunde konnte nicht benachrichtigt werden.', { show_alert: true }).catch(() => {});
+        }
+    };
+
+    // ─── TRESOR-AUSLIEFERUNG (INIT & HINWEIS-CHECK) ───────────────────────────
     bot.action(/^odeliv_vault_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         try {
             const orderId = ctx.match[1];
             const order = await orderRepo.getOrderByOrderId(orderId);
             if (!order) return ctx.answerCbQuery('Bestellung nicht gefunden.', { show_alert: true });
 
-            if (!order.details || order.details.length === 0) {
-                return ctx.answerCbQuery('Keine Artikel in der Bestellung.', { show_alert: true });
+            if (order.status === 'abgeschlossen') {
+                return ctx.answerCbQuery('⚠️ Diese Bestellung ist bereits abgeschlossen.', { show_alert: true });
             }
 
-            // 1. Vorrats-Prüfung für alle enthaltenen Artikel
-            for (const item of order.details) {
-                const prodId = item.product_id || item.id;
-                const count = await deliverableRepo.getAvailableCount(prodId);
-                const needed = item.quantity || 1;
+            // Prüfung: Läuft noch die automatische Zahlungserkennung im Hintergrund?
+            const isAutoActive = !order.auto_delivery_disabled && order.payment_identifier && (order.status === 'offen' || order.status === 'bezahlt_pending' || order.status === 'in_bearbeitung');
+            
+            if (isAutoActive) {
+                const warnText = `⚠️ *HINWEIS: AUTOMATISCHE ZAHLUNGSERKENNUNG AKTIV*\n\n` +
+                    `Für Bestellung \`#${order.order_id}\` läuft im Hintergrund noch die automatische Krypto-Zahlungserkennung.\n\n` +
+                    `Wenn du jetzt aus dem Tresor auslieferst, wird die *automatische Auslieferung für diese Bestellung dauerhaft DEAKTIVIERT*, um Doppel-Lieferungen zu verhindern.\n\n` +
+                    `Möchtest du die Auslieferung aus dem Tresor jetzt durchführen?`;
 
-                if (count < needed) {
-                    return ctx.answerCbQuery(`⚠️ Kein ausreichender Vorrat für "${item.name}" (${count}/${needed} verfügbar). Bitte Vorrat auffüllen oder manuell eingeben.`, { show_alert: true });
-                }
+                const warnKb = {
+                    inline_keyboard: [
+                        [{ text: '✅ Aus Tresor liefern (Auto-Scan stoppen)', callback_data: `odeliv_confirm_vault_${order.order_id}`, style: 'success' }],
+                        [{ text: '🔴 ❌ Abbrechen', callback_data: `oview_${order.order_id}`, style: 'danger' }]
+                    ]
+                };
+
+                return await uiHelper.updateOrSend(ctx, warnText, warnKb);
             }
 
-            // 2. Atomare Entnahme aus dem Tresor-Vorrat
-            const allDeliveredLines = [];
-            for (const item of order.details) {
-                const prodId = item.product_id || item.id;
-                const needed = item.quantity || 1;
-                const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
-                
-                if (!result.success) {
-                    return ctx.answerCbQuery(`❌ Fehler beim Entnehmen aus dem Vorrat.`, { show_alert: true });
-                }
-                allDeliveredLines.push(...result.items);
-            }
-
-            const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
-            const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
-
-            const tresorKeyboard = {
-                inline_keyboard: [[
-                    { text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }
-                ]]
-            };
-
-            const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
-
-            if (sentMsg) {
-                await orderRepo.setDigitalDelivery(orderId, formattedContent);
-                await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
-                await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Automatisch aus Tresor-Vorrat geliefert (${allDeliveredLines.length} Items).`);
-                
-                ctx.answerCbQuery('🟢 ✅ Aus dem Tresor geliefert!').catch(() => {});
-                
-                const payload = await orderHelper.buildOrderViewPayload(await orderRepo.getOrderByOrderId(orderId));
-                await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
-            } else {
-                ctx.answerCbQuery('❌ Kunde konnte nicht benachrichtigt werden.', { show_alert: true }).catch(() => {});
-            }
+            await executeVaultDelivery(ctx, order);
         } catch (error) {
             console.error('odeliv_vault error:', error.message);
             ctx.answerCbQuery(`❌ Fehler: ${error.message}`, { show_alert: true }).catch(() => {});
         }
     });
 
+    bot.action(/^odeliv_confirm_vault_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (!order) return ctx.reply('⚠️ Bestellung nicht gefunden.');
+            await executeVaultDelivery(ctx, order);
+        } catch (error) { console.error('odeliv_confirm_vault error:', error.message); }
+    });
+
+    // ─── MANUELLE EINGABE (INIT & HINWEIS-CHECK) ──────────────────────────────
     bot.action(/^odeliv_(?:manual_)?([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const orderId = ctx.match[1];
+            const order = await orderRepo.getOrderByOrderId(orderId);
+            if (!order) return ctx.reply('⚠️ Bestellung nicht gefunden.');
+
+            if (order.status === 'abgeschlossen') {
+                return ctx.reply('⚠️ Diese Bestellung ist bereits abgeschlossen.');
+            }
+
+            const isAutoActive = !order.auto_delivery_disabled && order.payment_identifier && (order.status === 'offen' || order.status === 'bezahlt_pending' || order.status === 'in_bearbeitung');
+
+            if (isAutoActive) {
+                const warnText = `⚠️ *HINWEIS: AUTOMATISCHE ZAHLUNGSERKENNUNG AKTIV*\n\n` +
+                    `Für Bestellung \`#${order.order_id}\` läuft im Hintergrund noch die automatische Krypto-Zahlungserkennung.\n\n` +
+                    `Wenn du jetzt manuell auslieferst, wird die *automatische Auslieferung für diese Bestellung dauerhaft DEAKTIVIERT*, um Doppel-Lieferungen zu verhindern.\n\n` +
+                    `Möchtest du die Manuelle Auslieferung starten?`;
+
+                const warnKb = {
+                    inline_keyboard: [
+                        [{ text: '✅ Manuell ausliefern (Auto-Scan stoppen)', callback_data: `odeliv_confirm_manual_${order.order_id}`, style: 'success' }],
+                        [{ text: '🔴 ❌ Abbrechen', callback_data: `oview_${order.order_id}`, style: 'danger' }]
+                    ]
+                };
+
+                return await uiHelper.updateOrSend(ctx, warnText, warnKb);
+            }
+
+            await orderRepo.disableAutoDelivery(orderId);
             if (!ctx.session) ctx.session = {};
             ctx.session.awaitingDigitalDelivery = orderId;
             await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
@@ -197,6 +268,20 @@ module.exports = (bot) => {
                 reply_markup: { inline_keyboard: [[{ text: '🔴 ❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
             });
         } catch (error) { console.error(error.message); }
+    });
+
+    bot.action(/^odeliv_confirm_manual_([a-zA-Z0-9]+)$/, isAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            const orderId = ctx.match[1];
+            await orderRepo.disableAutoDelivery(orderId);
+            if (!ctx.session) ctx.session = {};
+            ctx.session.awaitingDigitalDelivery = orderId;
+            await ctx.reply(texts.getDigitalDeliveryPrompt(orderId), {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{ text: '🔴 ❌ Abbrechen', callback_data: 'cancel_delivery' }]] }
+            });
+        } catch (error) { console.error('odeliv_confirm_manual error:', error.message); }
     });
 
     bot.action('cancel_delivery', async (ctx) => {
@@ -350,10 +435,11 @@ module.exports = (bot) => {
                 const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
                 
                 if (sentMsg) {
+                    await orderRepo.disableAutoDelivery(orderId);
                     await orderRepo.setDigitalDelivery(orderId, formattedContent);
                     await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
                     await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
-                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Digitale Lieferung gesendet.`);
+                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Digitale Lieferung gesendet. Auto-Scan gestoppt.`);
                     await ctx.reply(texts.getDigitalDeliverySuccess(orderId), { 
                         parse_mode: 'Markdown',
                         reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }

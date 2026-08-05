@@ -248,22 +248,24 @@ async function scanPendingOrders(bot) {
                 return;
             }
 
-            // Atomic Status Re-Check: Verhindere Doppel-Auslieferung durch synchrone Admin-Bestätigung
+            // Atomic Status Re-Check: Verhindere Doppel-Auslieferung durch synchrone Admin-Bestätigung oder manuelle Liefer-Kennzeichnung
             const freshOrder = await orderRepo.getOrderByOrderId(order.order_id);
-            if (!freshOrder || freshOrder.status === 'abgeschlossen') {
-                console.log(`[CryptoScanner] Order #${order.order_id} bereits abgeschlossen. Überspringe automatische Auslieferung.`);
+            if (!freshOrder || freshOrder.status === 'abgeschlossen' || freshOrder.auto_delivery_disabled) {
+                console.log(`[CryptoScanner] Order #${order.order_id} bereits abgeschlossen oder automatische Lieferung deaktiviert. Überspringe.`);
                 isRunning = false;
                 return;
             }
 
             let allHasStock = true;
+            let stockDetails = [];
             if (order.details && order.details.length > 0) {
                 for (const item of order.details) {
                     const prodId = item.product_id || item.id;
                     const count = await deliverableRepo.getAvailableCount(prodId);
-                    if (count < (item.quantity || 1)) {
+                    const needed = item.quantity || 1;
+                    stockDetails.push({ name: item.name, count, needed });
+                    if (count < needed) {
                         allHasStock = false;
-                        break;
                     }
                 }
             } else {
@@ -305,9 +307,9 @@ async function scanPendingOrders(bot) {
                     total: formatters.formatPrice(order.total_amount)
                 }).catch(() => {});
             } else {
-                // MANUELLE AUSLIEFERUNG FÜR PHYSICAL/MANUAL ITEMS
+                // MANUELLE AUSLIEFERUNG ERFORDERLICH (Z.B. UNZUREICHENDER VORRAT ODER PHYSICAL ITEMS)
                 await orderRepo.updateOrderStatus(order.order_id, 'in_bearbeitung');
-                await orderRepo.addAdminNote(order.order_id, 'System (Blockchain Auto-Verify)', `Zahlung per Blockchain bestätigt (TX: ${match.txId}). Auslieferung manuell erforderlich.`);
+                await orderRepo.addAdminNote(order.order_id, 'System (Blockchain Auto-Verify)', `Zahlung per Blockchain bestätigt (TX: ${match.txId}). Auslieferung manuell / Vorrat unzureichend.`);
 
                 const customerMsg = `⚡ *Krypto-Zahlung bestätigt!* (${symbol})\n\n` +
                     `Deine Zahlung für Bestellung \`#${order.order_id}\` wurde auf der Blockchain bestätigt.\n` +
@@ -315,11 +317,12 @@ async function scanPendingOrders(bot) {
 
                 await bot.telegram.sendMessage(order.user_id, customerMsg, { parse_mode: 'Markdown' }).catch(() => {});
 
+                const stockSummary = stockDetails.map(s => `▪️ ${s.name}: ${s.count}/${s.needed} verfügbar`).join('\n');
                 notificationService.notifyAdminsTxId({
                     orderId: order.order_id,
                     userId: order.user_id,
                     txId: match.txId,
-                    username: 'Auto-Scanner',
+                    username: `Auto-Scanner (⚠️ VORRAT UNZUREICHEND:\n${stockSummary})`,
                     total: formatters.formatPrice(order.total_amount)
                 }).catch(() => {});
             }

@@ -8,7 +8,7 @@ const generateCustomOrderId = () => {
 const SELECT_FULL = `id, order_id, user_id, total_amount, status, details,
     shipping_link, payment_method_name,
     delivery_method, admin_notes, tx_id, created_at, notification_msg_ids, feedback_invited, digital_delivery,
-    crypto_amount, payment_identifier, confirmations, received_crypto_amount, crypto_rate, last_rate_update, kyc_submission`;
+    crypto_amount, payment_identifier, confirmations, received_crypto_amount, crypto_rate, last_rate_update, kyc_submission, auto_delivery_disabled`;
 
 const createOrder = async (userId, totalAmount, orderDetails, options = {}) => {
     const { shippingLink, paymentMethodName, deliveryMethod, cryptoAmount, paymentIdentifier, cryptoRate, kycSubmission } = options;
@@ -296,6 +296,21 @@ const updateCryptoDetails = async (orderId, newCryptoAmount, newIdentifier, newR
     }
 };
 
+const disableAutoDelivery = async (orderId) => {
+    try {
+        const { data, error } = await supabase
+            .from('orders')
+            .update({ auto_delivery_disabled: true })
+            .eq('order_id', orderId)
+            .select(SELECT_FULL);
+        if (error) throw error;
+        return data && data[0] ? data[0] : null;
+    } catch (error) {
+        console.error('Error disabling auto delivery:', error.message);
+        return null;
+    }
+};
+
 module.exports = {
     createOrder, getOrderByOrderId, getOrderById,
     updateOrderStatus, updateOrderTxId, addAdminNote,
@@ -304,5 +319,6 @@ module.exports = {
     getOpenOrders, getAllOrders,
     addNotificationMsgId, clearNotificationMsgIds,
     setFeedbackInvited, setDigitalDelivery, getOrdersWithDigitalDelivery,
-    updateCryptoAmountAndRate, updateReceivedCryptoAmount, updateCryptoDetails
+    updateCryptoAmountAndRate, updateReceivedCryptoAmount, updateCryptoDetails,
+    disableAutoDelivery
 };
