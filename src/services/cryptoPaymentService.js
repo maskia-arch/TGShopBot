@@ -9,6 +9,7 @@ const orderRepo = require('../database/repositories/orderRepo');
 const deliverableRepo = require('../database/repositories/deliverableRepo');
 const notificationService = require('./notificationService');
 const cryptoExchangeService = require('./cryptoExchangeService');
+const uiHelper = require('../utils/uiHelper');
 const formatters = require('../utils/formatters');
 const https = require('https');
 
@@ -258,14 +259,22 @@ async function scanPendingOrders(bot) {
 
             let allHasStock = true;
             let stockDetails = [];
+            const itemsToDeliver = [];
+            const itemsToPop = [];
+
             if (order.details && order.details.length > 0) {
                 for (const item of order.details) {
                     const prodId = item.product_id || item.id;
-                    const count = await deliverableRepo.getAvailableCount(prodId);
                     const needed = item.quantity || 1;
-                    stockDetails.push({ name: item.name, count, needed });
-                    if (count < needed) {
+                    const available = await deliverableRepo.getAvailableItems(prodId);
+                    stockDetails.push({ name: item.name, count: available.length, needed });
+
+                    if (available.length < needed) {
                         allHasStock = false;
+                    } else {
+                        const selected = available.slice(0, needed);
+                        itemsToDeliver.push(...selected.map(s => s.content));
+                        itemsToPop.push({ prodId, needed });
                     }
                 }
             } else {
@@ -273,39 +282,39 @@ async function scanPendingOrders(bot) {
             }
 
             if (allHasStock) {
-                // AUTOMATISCHE TRESOR-AUSLIEFERUNG
-                const allDeliveredLines = [];
-                for (const item of order.details) {
-                    const prodId = item.product_id || item.id;
-                    const needed = item.quantity || 1;
-                    const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
-                    if (result.success) {
-                        allDeliveredLines.push(...result.items);
+                // 1. Transaktionaler Versand an Kunden ERST durchführen (mit Plaintext-Fallback & Chunking)
+                const sentSuccess = await uiHelper.sendSafeDeliveryMessage(bot.telegram, order.user_id, order.order_id, itemsToDeliver);
+
+                if (sentSuccess) {
+                    // 2. ERST NACH ERFOLGREICHEM VERSAND: Atomare Entnahme & PURGE aus dem Tresor-Vorrat
+                    for (const popItem of itemsToPop) {
+                        await deliverableRepo.popAvailableDeliverables(popItem.prodId, popItem.needed, order.order_id, order.user_id);
                     }
+
+                    const formattedContent = itemsToDeliver.map(line => line.startsWith('▪️ ') ? line : `▪️ ${line}`).join('\n');
+                    await orderRepo.setDigitalDelivery(order.order_id, formattedContent);
+                    await orderRepo.updateOrderStatus(order.order_id, 'abgeschlossen');
+                    await orderRepo.addAdminNote(order.order_id, 'System (Blockchain Auto-Verify)', `Zahlung bestätigt (TX: ${match.txId}) & ${itemsToDeliver.length} Items automatisch geliefert.`);
+
+                    notificationService.notifyAdminsTxId({
+                        orderId: order.order_id,
+                        userId: order.user_id,
+                        txId: match.txId,
+                        username: 'Auto-Scanner',
+                        total: formatters.formatPrice(order.total_amount)
+                    }).catch(() => {});
+                } else {
+                    // Falls Versand an den Kunden scheitert (Bot blockiert etc.), verbleiben Items im Tresor
+                    await orderRepo.updateOrderStatus(order.order_id, 'in_bearbeitung');
+                    await orderRepo.addAdminNote(order.order_id, 'System (Blockchain Auto-Verify)', `Zahlung bestätigt (TX: ${match.txId}), aber Nachricht-Versand an Kunden fehlgeschlagen. Vorräte im Tresor geschützt.`);
+                    notificationService.notifyAdminsTxId({
+                        orderId: order.order_id,
+                        userId: order.user_id,
+                        txId: match.txId,
+                        username: 'Auto-Scanner (⚠️ KUNDE BLOCKIERT / FEHLER BEIM VERSAND)',
+                        total: formatters.formatPrice(order.total_amount)
+                    }).catch(() => {});
                 }
-
-                const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
-                const customerMsg = `⚡ *Krypto-Zahlung automatisch bestätigt!* (${symbol})\n\n` +
-                    `Bestellung \`#${order.order_id}\` wurde auf der Blockchain bestätigt.\n\n` +
-                    `📦 *Deine Auslieferung:*\n${formattedContent}`;
-
-                const tresorKeyboard = {
-                    inline_keyboard: [[{ text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${order.order_id}`, style: 'success' }]]
-                };
-
-                await bot.telegram.sendMessage(order.user_id, customerMsg, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => {});
-
-                await orderRepo.setDigitalDelivery(order.order_id, formattedContent);
-                await orderRepo.updateOrderStatus(order.order_id, 'abgeschlossen');
-                await orderRepo.addAdminNote(order.order_id, 'System (Blockchain Auto-Verify)', `Zahlung bestätigt (TX: ${match.txId}) & ${allDeliveredLines.length} Items geliefert.`);
-
-                notificationService.notifyAdminsTxId({
-                    orderId: order.order_id,
-                    userId: order.user_id,
-                    txId: match.txId,
-                    username: 'Auto-Scanner',
-                    total: formatters.formatPrice(order.total_amount)
-                }).catch(() => {});
             } else {
                 // MANUELLE AUSLIEFERUNG ERFORDERLICH (Z.B. UNZUREICHENDER VORRAT ODER PHYSICAL ITEMS)
                 await orderRepo.updateOrderStatus(order.order_id, 'in_bearbeitung');
@@ -432,13 +441,21 @@ async function validateSpecificTxId(symbol, walletAddress, txId, expectedCrypto 
 
 async function fulfillOrderAutomatically(bot, order, txId, symbol = 'BTC') {
     let allHasStock = true;
+    const itemsToDeliver = [];
+    const itemsToPop = [];
+
     if (order.details && order.details.length > 0) {
         for (const item of order.details) {
             const prodId = item.product_id || item.id;
-            const count = await deliverableRepo.getAvailableCount(prodId);
-            if (count < (item.quantity || 1)) {
+            const needed = item.quantity || 1;
+            const available = await deliverableRepo.getAvailableItems(prodId);
+
+            if (available.length < needed) {
                 allHasStock = false;
-                break;
+            } else {
+                const selected = available.slice(0, needed);
+                itemsToDeliver.push(...selected.map(s => s.content));
+                itemsToPop.push({ prodId, needed });
             }
         }
     } else {
@@ -446,43 +463,34 @@ async function fulfillOrderAutomatically(bot, order, txId, symbol = 'BTC') {
     }
 
     if (allHasStock) {
-        const allDeliveredLines = [];
-        for (const item of order.details) {
-            const prodId = item.product_id || item.id;
-            const needed = item.quantity || 1;
-            const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
-            if (result.success) {
-                allDeliveredLines.push(...result.items);
+        // Transaktionaler Versand an Kunden (mit Plaintext Fallback & Chunking)
+        const sentSuccess = await uiHelper.sendSafeDeliveryMessage(bot.telegram, order.user_id, order.order_id, itemsToDeliver);
+
+        if (sentSuccess) {
+            // ERST NACH ERFOLGREICHEM VERSAND: Atomare Entnahme aus dem Vorrat
+            for (const popItem of itemsToPop) {
+                await deliverableRepo.popAvailableDeliverables(popItem.prodId, popItem.needed, order.order_id, order.user_id);
             }
+
+            const formattedContent = itemsToDeliver.map(line => line.startsWith('▪️ ') ? line : `▪️ ${line}`).join('\n');
+            await orderRepo.setDigitalDelivery(order.order_id, formattedContent);
+            await orderRepo.updateOrderStatus(order.order_id, 'abgeschlossen');
+            await orderRepo.addAdminNote(order.order_id, 'System (TX-ID Verify)', `Zahlung bestätigt (TX: ${txId}) & ${itemsToDeliver.length} Items automatisch geliefert.`);
+
+            notificationService.notifyAdminsTxId({
+                orderId: order.order_id,
+                userId: order.user_id,
+                txId: txId,
+                username: 'Kunde (TX-ID Verified)',
+                total: formatters.formatPrice(order.total_amount)
+            }).catch(() => {});
+        } else {
+            await orderRepo.updateOrderStatus(order.order_id, 'in_bearbeitung');
+            await orderRepo.addAdminNote(order.order_id, 'System (TX-ID Verify)', `Zahlung per TX-ID verifiziert (TX: ${txId}), aber Versand fehlgeschlagen. Vorräte im Tresor geschützt.`);
         }
-
-        const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
-        const customerMsg = `⚡ *Krypto-Zahlung erfolgreich verifiziert!* (${symbol})\n\n` +
-            `Bestellung \`#${order.order_id}\` wurde auf der Blockchain bestätigt!\n\n` +
-            `📦 *Deine Auslieferung:*\n${formattedContent}`;
-
-        const tresorKeyboard = {
-            inline_keyboard: [[{ text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${order.order_id}`, style: 'success' }]]
-        };
-
-        if (bot) {
-            await bot.telegram.sendMessage(order.user_id, customerMsg, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => {});
-        }
-
-        await orderRepo.setDigitalDelivery(order.order_id, formattedContent);
-        await orderRepo.updateOrderStatus(order.order_id, 'abgeschlossen');
-        await orderRepo.addAdminNote(order.order_id, 'System (TX-ID Verify)', `Zahlung bestätigt (TX: ${txId}) & ${allDeliveredLines.length} Items geliefert.`);
-
-        notificationService.notifyAdminsTxId({
-            orderId: order.order_id,
-            userId: order.user_id,
-            txId: txId,
-            username: 'Kunde (TX-ID Verified)',
-            total: formatters.formatPrice(order.total_amount)
-        }).catch(() => {});
     } else {
         await orderRepo.updateOrderStatus(order.order_id, 'in_bearbeitung');
-        await orderRepo.addAdminNote(order.order_id, 'System (TX-ID Verify)', `Zahlung per TX-ID bestätigt (TX: ${txId}). Manuelle Auslieferung erforderlich.`);
+        await orderRepo.addAdminNote(order.order_id, 'System (TX-ID Verify)', `Zahlung per TX-ID bestätigt (TX: ${txId}). Manuelle Auslieferung erforderlich / Vorrat unzureichend.`);
 
         const customerMsg = `⚡ *Krypto-Zahlung verifiziert!* (${symbol})\n\n` +
             `Deine Zahlung für Bestellung \`#${order.order_id}\` wurde auf der Blockchain verifiziert!\n` +
@@ -496,7 +504,7 @@ async function fulfillOrderAutomatically(bot, order, txId, symbol = 'BTC') {
             orderId: order.order_id,
             userId: order.user_id,
             txId: txId,
-            username: 'Kunde (TX-ID Verified)',
+            username: 'Kunde (TX-ID Verified - Vorrat unzureichend)',
             total: formatters.formatPrice(order.total_amount)
         }).catch(() => {});
     }

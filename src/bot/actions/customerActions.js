@@ -172,15 +172,14 @@ module.exports = (bot) => {
                 return ctx.answerCbQuery('Noch keine digitalen Artikel geliefert.', { show_alert: true });
             }
 
-            const msgText = texts.getDigitalDeliveryCustomerMessage(orderId, order.digital_delivery);
             const keyboard = {
                 inline_keyboard: [
                     [{ text: '🔙 Zur Bestellung', callback_data: `cust_order_detail_${orderId}` }]
                 ]
             };
 
-            // Permanente Nachricht – kein Lösch-Button, bleibt im Chat
-            await ctx.reply(msgText, { parse_mode: 'Markdown', reply_markup: keyboard });
+            const lines = order.digital_delivery.split('\n');
+            await uiHelper.sendSafeDeliveryMessage(ctx.telegram, userId, orderId, lines, keyboard);
 
         } catch (error) {
             console.error('Tresor Error:', error.message);
@@ -230,8 +229,8 @@ module.exports = (bot) => {
             const keyboard = {
                 inline_keyboard: [[{ text: '🔙 Zur Bestellung', callback_data: `cust_order_detail_${orderId}` }]]
             };
-            const msgText = texts.getDigitalDeliveryCustomerMessage(orderId, order.digital_delivery);
-            await ctx.reply(msgText, { parse_mode: 'Markdown', reply_markup: keyboard });
+            const lines = order.digital_delivery.split('\n');
+            await uiHelper.sendSafeDeliveryMessage(ctx.telegram, ctx.from.id, orderId, lines, keyboard);
         } catch (error) {
             ctx.answerCbQuery('Fehler beim Laden.', { show_alert: true }).catch(() => {});
         }

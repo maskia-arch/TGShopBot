@@ -131,56 +131,48 @@ module.exports = (bot) => {
             return ctx.answerCbQuery('Keine Artikel in der Bestellung.', { show_alert: true });
         }
 
-        // 1. Vorrats-Prüfung für alle Artikel
+        // 1. Vorrats-Prüfung & Lesen der Items (OHNE sie sofort zu löschen)
+        const itemsToDeliver = [];
+        const itemsToPop = [];
+
         for (const item of order.details) {
             const prodId = item.product_id || item.id;
-            const count = await deliverableRepo.getAvailableCount(prodId);
             const needed = item.quantity || 1;
+            const available = await deliverableRepo.getAvailableItems(prodId);
 
-            if (count < needed) {
-                return ctx.answerCbQuery(`⚠️ Kein ausreichender Vorrat für "${item.name}" (${count}/${needed} verfügbar). Bitte Vorrat auffüllen.`, { show_alert: true });
+            if (available.length < needed) {
+                return ctx.answerCbQuery(`⚠️ Kein ausreichender Vorrat für "${item.name}" (${available.length}/${needed} verfügbar). Bitte Vorrat auffüllen.`, { show_alert: true });
             }
+
+            const selected = available.slice(0, needed);
+            itemsToDeliver.push(...selected.map(s => s.content));
+            itemsToPop.push({ prodId, needed });
         }
 
-        // 2. Auto-Delivery in DB deaktivieren (Race-Condition Guard)
+        // 2. Transaktionaler Versand an Kunden ERST durchführen (mit Plaintext-Fallback & Chunking)
+        const sentSuccess = await uiHelper.sendSafeDeliveryMessage(bot.telegram, order.user_id, orderId, itemsToDeliver);
+
+        if (!sentSuccess) {
+            // Falls Senden fehlschlägt (z.B. Kunde hat Bot blockiert), VERBLEIBEN alle Items sicher im Tresor!
+            return ctx.answerCbQuery('❌ Sende-Fehler: Nachricht konnte nicht an den Kunden zugestellt werden (z. B. Bot blockiert). Vorräte bleiben im Tresor geschützt.', { show_alert: true });
+        }
+
+        // 3. ERST NACH ERFOLGREICHEM VERSAND: Atomare Entnahme & PURGE aus dem Tresor-Vorrat
+        for (const popItem of itemsToPop) {
+            await deliverableRepo.popAvailableDeliverables(popItem.prodId, popItem.needed, order.order_id, order.user_id);
+        }
+
+        // 4. Auto-Delivery in DB deaktivieren & Status auf abgeschlossen setzen
         await orderRepo.disableAutoDelivery(orderId);
-
-        // 3. Atomare Entnahme & PURGE aus dem Tresor-Vorrat
-        const allDeliveredLines = [];
-        for (const item of order.details) {
-            const prodId = item.product_id || item.id;
-            const needed = item.quantity || 1;
-            const result = await deliverableRepo.popAvailableDeliverables(prodId, needed, order.order_id, order.user_id);
-            
-            if (!result.success) {
-                return ctx.answerCbQuery(`❌ Fehler bei der Entnahme aus dem Vorrat.`, { show_alert: true });
-            }
-            allDeliveredLines.push(...result.items);
-        }
-
-        const formattedContent = allDeliveredLines.map(line => `▪️ ${line}`).join('\n');
-        const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
-
-        const tresorKeyboard = {
-            inline_keyboard: [[
-                { text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }
-            ]]
-        };
-
-        const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
-
-        if (sentMsg) {
-            await orderRepo.setDigitalDelivery(orderId, formattedContent);
-            await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
-            await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Aus Tresor geliefert (${allDeliveredLines.length} Items). Auto-Scan gestoppt.`);
-            
-            ctx.answerCbQuery('🟢 ✅ Aus dem Tresor geliefert!').catch(() => {});
-            
-            const payload = await orderHelper.buildOrderViewPayload(await orderRepo.getOrderByOrderId(orderId));
-            await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
-        } else {
-            ctx.answerCbQuery('❌ Kunde konnte nicht benachrichtigt werden.', { show_alert: true }).catch(() => {});
-        }
+        const formattedContent = itemsToDeliver.map(line => line.startsWith('▪️ ') ? line : `▪️ ${line}`).join('\n');
+        await orderRepo.setDigitalDelivery(orderId, formattedContent);
+        await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
+        await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Aus Tresor geliefert (${itemsToDeliver.length} Items). Auto-Scan gestoppt.`);
+        
+        ctx.answerCbQuery('🟢 ✅ Aus dem Tresor geliefert!').catch(() => {});
+        
+        const payload = await orderHelper.buildOrderViewPayload(await orderRepo.getOrderByOrderId(orderId));
+        await uiHelper.updateOrSend(ctx, payload.text, payload.reply_markup);
     };
 
     // ─── TRESOR-AUSLIEFERUNG (INIT & HINWEIS-CHECK) ───────────────────────────
@@ -424,30 +416,26 @@ module.exports = (bot) => {
                 const order = await orderRepo.getOrderByOrderId(orderId);
                 if (!order) return ctx.reply(`⚠️ Bestellung ${orderId} nicht gefunden.`);
                 await orderHelper.clearOldNotifications(ctx, order);
-                const formattedContent = input.split(',').map(item => `▪️ ${item.trim()}`).join('\n');
-                const customerMessage = texts.getDigitalDeliveryCustomerMessage(orderId, formattedContent);
-                // Permanente Liefernachricht mit Tresor-Zugang (kein Lösch-Button)
-                const tresorKeyboard = {
-                    inline_keyboard: [[
-                        { text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }
-                    ]]
-                };
-                const sentMsg = await bot.telegram.sendMessage(order.user_id, customerMessage, { parse_mode: 'Markdown', reply_markup: tresorKeyboard }).catch(() => null);
+
+                const rawLines = input.includes('\n') ? input.split('\n') : input.split(',');
+                const formattedContentLines = rawLines.map(item => item.trim()).filter(item => item.length > 0);
+                const formattedContent = formattedContentLines.map(line => line.startsWith('▪️ ') ? line : `▪️ ${line}`).join('\n');
+
+                const sentSuccess = await uiHelper.sendSafeDeliveryMessage(bot.telegram, order.user_id, orderId, formattedContentLines);
                 
-                if (sentMsg) {
+                if (sentSuccess) {
                     await orderRepo.disableAutoDelivery(orderId);
                     await orderRepo.setDigitalDelivery(orderId, formattedContent);
                     await orderRepo.updateOrderStatus(orderId, 'abgeschlossen');
-                    await orderRepo.addNotificationMsgId(orderId, sentMsg.chat.id, sentMsg.message_id);
-                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Digitale Lieferung gesendet. Auto-Scan gestoppt.`);
+                    await orderRepo.addAdminNote(orderId, ctx.from.username || ctx.from.id, `Manuelle digitale Lieferung gesendet. Auto-Scan gestoppt.`);
                     await ctx.reply(texts.getDigitalDeliverySuccess(orderId), { 
                         parse_mode: 'Markdown',
                         reply_markup: { inline_keyboard: [[{ text: '📋 Bestellung öffnen', callback_data: `oview_${orderId}` }]] }
                     });
                 } else {
-                    await ctx.reply(`❌ Fehler: Nachricht konnte nicht gesendet werden.`);
+                    await ctx.reply(`❌ Fehler: Nachricht konnte nicht an den Kunden zugestellt werden (z. B. Bot vom Kunden blockiert). Der Status wurde nicht geändert.`);
                 }
-            } catch (error) { console.error(error.message); }
+            } catch (error) { console.error('Manual digital delivery error:', error.message); }
             return;
         }
 

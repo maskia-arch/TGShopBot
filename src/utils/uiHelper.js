@@ -326,12 +326,111 @@ const sendTemporary = async (ctx, text, seconds = 3) => {
         console.error('[UIHelper] Temp Message Error:', error.message);
     }
 };
+/**
+ * Sendet digitale Lieferungen extrem sicher, ausfallsicher & manipulationsgeschützt an den Kunden.
+ * - Unterteilt Massen-Bestellungen (viele Einheiten/Items) automatisch in Chunks <= 3000 Zeichen (Telegram 4096 Limit).
+ * - Versucht zunächst Markdown; fällt bei Sonderzeichen (z.B. '[iPhone]', 'reg_date') automatisch auf Plaintext zurück.
+ * - Gibt TRUE nur zurück, wenn ALLE Chunks erfolgreich bei Telegram zugestellt wurden!
+ */
+const sendSafeDeliveryMessage = async (telegram, targetUserId, orderId, formattedContentLines, extraKeyboard = null) => {
+    if (!telegram || !targetUserId || !formattedContentLines) return false;
+
+    let items = [];
+    if (Array.isArray(formattedContentLines)) {
+        items = formattedContentLines;
+    } else if (typeof formattedContentLines === 'string') {
+        items = formattedContentLines.split('\n').filter(l => l.trim().length > 0);
+    }
+
+    if (items.length === 0) return false;
+
+    // Massenbestellungs-Chunking (Telegram 4096-Zeichen Guard)
+    const chunks = [];
+    let currentChunk = [];
+    let currentLen = 0;
+
+    for (const item of items) {
+        const lineStr = item.startsWith('▪️ ') ? item : `▪️ ${item.trim()}`;
+        if (currentLen + lineStr.length > 3000 && currentChunk.length > 0) {
+            chunks.push(currentChunk.join('\n'));
+            currentChunk = [lineStr];
+            currentLen = lineStr.length;
+        } else {
+            currentChunk.push(lineStr);
+            currentLen += lineStr.length + 1;
+        }
+    }
+    if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join('\n'));
+    }
+
+    const defaultTresorKb = {
+        inline_keyboard: [[{ text: '🔐 Deliverables Tresor', callback_data: `cust_tresor_${orderId}` }]]
+    };
+    const keyboard = sanitizeKeyboard(extraKeyboard || defaultTresorKb);
+
+    let allSuccess = true;
+
+    for (let i = 0; i < chunks.length; i++) {
+        const isLast = (i === chunks.length - 1);
+        const chunkText = chunks[i];
+        const pageHeader = chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : '';
+
+        const markdownMsg = `🎉 *Deine Lieferung ist da!*${pageHeader}\n\n` +
+            `Bestellung \`#${orderId}\` wurde geliefert:\n\n` +
+            `📦 *Inhalt:*\n` +
+            `➖➖➖➖➖➖➖➖➖➖\n` +
+            `${chunkText}\n` +
+            `➖➖➖➖➖➖➖➖➖➖\n\n` +
+            `Vielen Dank für deinen Einkauf!`;
+
+        const plainMsg = `🎉 Deine Lieferung ist da!${pageHeader}\n\n` +
+            `Bestellung #${orderId} wurde geliefert:\n\n` +
+            `📦 Inhalt:\n` +
+            `➖➖➖➖➖➖➖➖➖➖\n` +
+            `${chunkText}\n` +
+            `➖➖➖➖➖➖➖➖➖➖\n\n` +
+            `Vielen Dank für deinen Einkauf!`;
+
+        const optsMarkdown = {
+            parse_mode: 'Markdown',
+            ...(isLast && { reply_markup: keyboard })
+        };
+
+        const optsPlain = {
+            ...(isLast && { reply_markup: keyboard })
+        };
+
+        let sentMsg = null;
+        try {
+            // 1. Versuch: Markdown
+            sentMsg = await telegram.sendMessage(targetUserId, markdownMsg, optsMarkdown);
+        } catch (err1) {
+            // 2. Versuch: Plaintext Fallback (Absolut sturmfest gegen '[', '_', '*', etc.)
+            try {
+                sentMsg = await telegram.sendMessage(targetUserId, plainMsg, optsPlain);
+            } catch (err2) {
+                console.error(`[sendSafeDeliveryMessage] Fehler beim Senden von Chunk ${i+1}/${chunks.length} an ${targetUserId}:`, err2.message);
+                allSuccess = false;
+                break;
+            }
+        }
+
+        if (!sentMsg) {
+            allSuccess = false;
+            break;
+        }
+    }
+
+    return allSuccess;
+};
 
 module.exports = { 
     updateOrSend, 
     sendTemporary, 
     sendProductMedia, 
     showProductWithMedia,
+    sendSafeDeliveryMessage,
     touchSession,
     scheduleMessageExpiry,
     parseMedia: parseStoredMedia,
