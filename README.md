@@ -1,139 +1,122 @@
-# 🤖 t.me/autoacts – Shop Bot Core | v0.5.6
+# 🤖 t.me/autoacts – TGSHOPBOT Core | v0.6.2
 
-[span_0](start_span)Ein professionelles Telegram-E-Commerce-System mit hierarchischer Rechteverwaltung, flexiblem Liefersystem, manuellem Zahlungsflow und dezentraler Datenstruktur.[span_0](end_span) [span_1](start_span)Entwickelt von t.me/autoacts.[span_1](end_span)
+Ein professionelles, gehärtetes Telegram-E-Commerce-System mit transaktionaler Tresor-Auslieferung, Multi-Coin Blockchain Auto-Verifizierung, KYC-Legitimierung, Coupon-System, hierarchischer Rechteverwaltung und dezentraler Datenstruktur.
+
+Entwickelt von **t.me/autoacts**.
 
 ---
 
-## 🆕 Changelog v0.5.6 – Deliverables Tresor & Einzel-Bestellübersicht
+## 🆕 Release Notes v0.6.2 – Transaktionale Sicherheit & Massen-Auslieferung
 
-- **🔐 Deliverables Tresor:** Kunden können jederzeit auf ihre gelieferten digitalen Artikel zugreifen – auch nachträglich über die Einzel-Bestellübersicht.
-- **📋 Einzel-Bestellübersicht:** Jede Bestellung hat eine eigene Detailansicht für Kunden. Ping & Kontakt sind dorthin verschoben.
-- **🔄 Replace anfragen:** Kunden können direkt in der Bestellübersicht einen Ersatz für gelieferte digitale Artikel anfragen. Admin & Master werden benachrichtigt.
-- **📦 Permanente Liefernachrichten:** Gelieferte digitale Artikel bleiben dauerhaft im Kundenchat sichtbar (kein Lösch-Button mehr).
-- **🔐 Master Tresor:** Der Master hat Zugriff auf alle gelieferten digitalen Artikel über den neuen "Deliverables Tresor" im Master-Menü.
-- **⚙️ Admin Tresor-Einsicht:** In der Admin-Bestellübersicht wird der gelieferte Inhalt direkt angezeigt.
-- **📱 /myorders Befehl:** Kunden können direkt mit `/myorders` ihre Bestellungen aufrufen.
-- **/feedbacks Befehl:** Kunden können direkt mit `/feedbacks` die Shop-Bewertungen aufrufen.
-- **ℹ️ Info & Befehle:** Neue Kundenbefehle sind im Hilfe-Menü dokumentiert.
+- ⚡ **Transaktionale Tresor-Auslieferung & Purge-Schutz**: Digitale Artikel (`product_deliverables`) werden erst **nach** erfolgreicher Telegram-Zustellungsbestätigung aus der Vorrats-Datenbank gelöscht. Scheitert das Senden (z. B. Kunde hat den Bot blockiert), verbleiben 100% aller Artikel sicher im Tresor.
+- 🛡️ **Plaintext-Fallback & Sonderzeichen-Schutz**: Schützt Auslieferungen vor Telegram-Markdown-Parsing-Fehlern bei unentkommenen Zeichen in Zugangsdaten oder Keys (wie `[iPhone]`, `reg_date`, `|`).
+- 📦 **Massenbestellungs-Chunking**: Auslieferungen mit vielen Artikeln oder langem Inhalt (> 3.000 Zeichen) werden automatisch in Telegram-Teilnachrichten (`Teil 1/2`, `Teil 2/2`) aufgeteilt.
+- 🔑 **Auto-Delivery Override Guard**: Führt ein Betreiber eine manuelle Lieferung durch (aus dem Tresor oder per Freitext), wird der automatische Krypto-Blockchain-Scanner pro Order geräuschlos deaktiviert (`auto_delivery_disabled = true`).
 
-## 🆕 Changelog v0.5.0 – Feedback-System & Command-Refactoring
-- **⭐ Neues Feedback-System:** Kunden können qualifizierte Bestellungen mit Sternen (1-5) und einem Kommentar bewerten.
-- **🕵️ Anonymitäts-Option:** Kunden können wählen, ob ihr Username oder "CustomerXXXX" angezeigt wird.
-- **✅ Freigabe-Workflow:** Admins/Master prüfen neue Feedbacks, bevor diese öffentlich in der Kundenansicht erscheinen.
-- **🧹 Command-Refactoring:** Der fehleranfällige `/orders` Befehl wurde durch `/allorders` und `/allopenorders` ersetzt, um Konflikte bei der Order-ID-Suche zu verhindern.
-- **ℹ️ Rollenspezifische Menüs:** Der "Befehle & Info"-Button zeigt nun strikt getrennte Funktionen und Erklärungen für Admins und Master an.
+## 🆕 Features v0.6.1 & v0.6.0
 
-## ✨ Hauptfunktionen (Zusammenfassung v0.3.0 - v0.5.0)
+- 📊 **Vorratsgrenzen & Kunden-Transparenz (v0.6.1)**: Dynamische Mengeneinschränkung im Checkout und Mengenausgabe-Menü auf den realen Tresor-Bestand.
+- 🪪 **KYC-Legitimierung für Produkte (v0.6.0)**: Konfigurierbare Nachweis-Pflicht (Selfie, Ausweis, Dokumente) bei Versand & Lieferung.
+- ₿ **Multi-Coin Blockchain Auto-Verifizierung (v0.6.0)**: Automatische Überwachung für **BTC**, **LTC**, **ETH** & **SOL** mit 4-stelliger Zuordnungs-Kennziffer (`payment_identifier`) und Live Ticker Countdown.
+- 🎟️ **Gutschein- & Coupon-System (v0.6.0)**: Rabatt-Codes (% & €) mit Ablaufdaten, Maximalnutzung und Produktbindung.
+- ⏰ **Bot-Status & Öffnungszeiten (v0.6.0)**: `🟢 Geöffnet`, `🔴 Sofort geschlossen` oder `⏰ Feste Öffnungszeiten` mit individuellen Abwesenheitsnachrichten.
 
-### 🛍 Bestell- & Bezahlsystem
-- **[span_2](start_span)Vollständiger Bestellfluss:** Der Shop bietet einen nahtlosen Ablauf von Warenkorb über Checkout zur Rechnung und Statusverfolgung.[span_2](end_span)
-- **[span_3](start_span)TX-ID Zahlungsflow:** Kunden bestätigen ihre Zahlungen per TX-ID, woraufhin Admins sofort zur manuellen Prüfung benachrichtigt werden.[span_3](end_span)
-- **[span_4](start_span)Persistente Kunden-Receipts:** Nach dem Kauf erhalten Kunden eine dauerhafte Rechnung inklusive kopierbarer Zahlungsadresse.[span_4](end_span)
+---
+
+## ✨ Hauptfunktionen
+
+### 🛍️ Bestell- & Bezahlsystem
+- **Multi-Coin Krypto-Automatisierung**: Automatische Blockchain-Zahlungserkennung für Bitcoin, Litecoin, Ethereum und Solana.
+- **TX-ID Zahlungsflow (Manuell)**: Kunden können Zahlungen auch manuell per TX-ID bestätigen.
+- **Persistente Kunden-Receipts**: Dauerhafte digitale Rechnungen inklusive kopierbarer Wallet-Adresse und Ticker.
 
 ### 🚚 Intelligentes Liefersystem
-- **[span_5](start_span)[span_6](start_span)Flexible Lieferoptionen:** Für jedes Produkt kann individuell konfiguriert werden, ob es digital (kein Versand), per Versand, zur Abholung oder mit einer Wahlmöglichkeit (Versand & Abholung) angeboten wird.[span_5](end_span)[span_6](end_span)
-- **Sichere Versandadressen:** Aus Sicherheitsgründen werden Adressen nur als Privnote-Link akzeptiert; [span_7](start_span)Klartext wird automatisch gelöscht.[span_7](end_span)
+- **Flexible Lieferoptionen**: Digital (kein Versand), Versand, Abholung oder Versand & Abholung wählbar.
+- **Transaktionaler Digitalkey-Tresor**: Atomare Entnahme digitaler Güter aus `product_deliverables` mit Purge-Schutz.
+- **Datenschutz bei Versand**: Versandadressen werden nur als selbstzerstörende Privnote-Links akzeptiert.
 
-### 🛠 Hierarchische Verwaltung (Master & Admin)
-- **[span_8](start_span)Drill-Down Admin-Menü:** Admins navigieren übersichtlich durch `Kategorie » Unterkategorie » Produkte`.[span_8](end_span)
-- **[span_9](start_span)Spam-freies Sortieren:** Die Position von Produkten und Kategorien (🔼/🔽) lässt sich geräuschlos via Text/Bild-Edit ändern.[span_9](end_span)
-- **[span_10](start_span)Smart Cleaning:** Der Bot räumt den Chat automatisch auf und löscht obsolete Benachrichtigungen (wie "Neue Bestellung"), sobald eine Bestellung bearbeitet wird.[span_10](end_span)
-- **[span_11](start_span)Erweiterte Kundenübersicht:** Das Master-Panel bietet eine Übersicht über Umsatz, Bestellhistorien sowie Ban- und Lösch-Funktionen pro Kunde.[span_11](end_span)
-## 🏗 Architektur @autoacts
+### 🛠️ Hierarchische Verwaltung (Master & Admin)
+- **Drill-Down Admin-Panel**: Kategorien » Unterkategorien » Produkte übersichtlich verwalten.
+- **Smart Cleaning**: Automatische Löschung obsolet gewordener Admin-Benachrichtigungen beim Bearbeiten von Bestellungen.
+- **Master-Panel**: Vollständige Übersicht über Umsätze, Kundenhistorien, Admin-Rechte, Ban-Verwaltung und Master-Tresor.
 
-### 🛒 Bestell- & Feedbackfluss
+---
 
-Kunde: Shop → Warenkorb → Checkout
-↓
-[Lieferoption wählen: Versand / Abholung / keine]
-↓
-[Versandadresse als Privnote-Link (nur bei Versand)]
-↓
-Zahlungsart wählen → Rechnung mit Kategorie-Pfad & Wallet-Adresse
-↓
-"Bestellung abschicken" → Order erstellt
-↓
-Receipt an Kunden (persistent):
-• Order-ID, Betrag, Zahlungsadresse
-• Button "💸 Zahlung bestätigen"
-↓
-Admin/Master erhält: "NEUE BESTELLUNG" (Bot merkt sich Message-ID)
-↓
-Kunde: "Zahlung bestätigen" → TX-ID eingeben
-↓
-Status: "Bezahlt? (Prüfung)" → Admin prüft
-↓
-Admin: Klickt auf "Bestellung öffnen" (Smart Cleaning löscht die Benachrichtigung)
-→ Status manuell ändern → Kunde erhält Status-Update
-↓
-Admin: Qualifiziert die Bestellung für ein ⭐ Feedback
-↓
-Kunde erhält Einladung → Gibt Sterne (1-5) & Kommentar ab → Wählt Anonymität
-↓
-Admin/Master prüft das Feedback → Klickt auf ✅ Freigeben
-↓
-Feedback ist nun im Hauptmenü für alle Kunden öffentlich sichtbar
+## 🏗️ Architektur & Rollensystem
 
-
-### 👥 Rollensystem
+### 👥 Rollenmatrix
 
 | Rolle | Rechte |
 |---|---|
-| **👑 Master** | Alles. [span_12](start_span)Admins verwalten, Zahlungsarten, Kundenübersicht, Freigaben, Bans bestätigen[span_12](end_span) |
-| **🛠 Admin** | [span_13](start_span)Produkte/Kategorien verwalten, Bestellungen bearbeiten, Broadcasts, Statusänderungen[span_13](end_span) |
-| **👤 Kunde** | [span_14](start_span)Shop durchsuchen, bestellen, Zahlung bestätigen, Ping/Kontakt[span_14](end_span), ⭐ Feedback abgeben |
+| **👑 Master** | Vollzugriff: Admins verwalten, Zahlungsarten, Kundenübersicht, Gutscheine, Freigaben, Bans bestätigen, Master-Tresor |
+| **🛠️ Admin** | Produkte & Kategorien verwalten, Vorräte aufstocken, Bestellungen bearbeiten & manuell ausliefern, Broadcasts |
+| **👤 Kunde** | Shop durchsuchen, bestellen, Krypto bezahlen, KYC-Dokumente hochladen, Deliverables Tresor einsehen, ⭐ Feedback abgeben |
 
-### 📦 Lieferoptionen (pro Produkt)
+### 📦 Lieferoptionen
 
 | Option | Checkout-Verhalten |
 |---|---|
-| 📱 Digital | [span_15](start_span)Direkt zur Zahlung, keine Adressabfrage[span_15](end_span) |
-| 🚚 Versand | [span_16](start_span)Privnote-Adresse erforderlich[span_16](end_span) |
-| 🏪 Abholung | [span_17](start_span)Direkt zur Zahlung[span_17](end_span) |
-| 🚚🏪 Beide | [span_18](start_span)Kunde wählt Versand oder Abholung[span_18](end_span) |
+| ⚡ Digital | Automatische oder manuelle Tresor-Auslieferung, keine Adresse erforderlich |
+| 🚚 Versand | Privnote-Adresse erforderlich (+ optional KYC-Dokumente) |
+| 🏪 Abholung | Direkte Zahlungsabwicklung (+ optional KYC-Dokumente) |
+| 🚚🏪 Beide | Kunde wählt im Checkout zwischen Versand und Abholung |
+
+---
 
 ## 🚀 Installation & Setup
 
 ### 1. Abhängigkeiten
-[span_19](start_span)Es wird Node.js (v18+) benötigt.[span_19](end_span)
+Es wird Node.js (v18+) benötigt.
 ```bash
 npm install
+```
 
-2. Datenbank (Supabase)
-Die gesamte Datenbankstruktur muss im Supabase SQL Editor ausgeführt werden.
-Wichtig für V0.5: Stelle sicher, dass die neue Tabelle feedbacks und die Spalte feedback_invited in der Tabelle orders angelegt sind.  
+### 2. Datenbank (Supabase PostgreSQL)
+1. Erstelle ein Projekt auf [supabase.com](https://supabase.com).
+2. Führe unter **SQL Editor** den Inhalt von `Setup/FULL_SCHEMA.sql` aus.
+3. Führe für Updates bestehender Versionen die Migrations-Skripte aus (`Setup/MIGRATION_UPDATE_v0.6.sql` & `Setup/MIGRATION_UPDATE_v0.6.1.sql`).
 
-3. Environment Variables
-Lege folgende Variablen in deiner .env Datei oder in den Settings deines Hosters (z.B. Render.com) an:  
-TELEGRAM_BOT_TOKEN=your_bot_token
-SUPABASE_URL=[https://your-project.supabase.co](https://your-project.supabase.co)
-SUPABASE_KEY=your_service_role_key
-MASTER_ADMIN_ID=your_telegram_id
-VERSION=0.5.0
+### 3. Umgebungsvariablen (.env)
+```env
+TELEGRAM_BOT_TOKEN=dein_bot_token
+SUPABASE_URL=https://dein-projekt.supabase.co
+SUPABASE_KEY=dein_service_role_key
+MASTER_ADMIN_ID=deine_telegram_id
+VERSION=0.6.2
 PORT=10000
+```
 
-4. Starten
-node src/index.js
+### 4. Bot starten
+```bash
+# Entwicklung / Lokal
+npm run dev
 
-🔧 Bot-Befehle V0.5
+# Produktion
+npm start
+```
 
-Befehl Rolle Beschreibung
-/start Alle Hauptmenü (rollenbasiert)
-/allorders Admin/Master Alle Bestellungen anzeigen (Ersatz für /orders)
-/allopenorders Admin/Master Alle offenen Bestellungen anzeigen
-/orderid ORD-XXXX Admin/Master Einzelne Bestellung öffnen
-/id ORD-XXXX Admin/Master Alias für /orderid
-/deleteid ORD-XXXX Admin/Master Bestellung löschen
-/ban 123456789 Admin/Master User sperren
-/addadmin 123456789 Master Admin hinzufügen
+---
 
-🛡 Sicherheit & Tech Stack
-Privnote-Adressen: Versandadressen werden nur als selbstzerstörende Privnote-Links akzeptiert. Klartext wird automatisch gelöscht.  
-Ban-System: 48h Pending mit Master-Override. Gebannte User können den Bot nicht mehr nutzen.  
-Approval-Workflow: Admin-Aktionen (Preisänderungen, Löschungen) erfordern Master-Freigabe.  
-Datenbanksicherheit: Row Level Security (RLS) aktiv. Der Bot arbeitet sicher über den Service Role Key.  
-Tech Stack: Node.js, Telegraf v4, Supabase (PostgreSQL), Render.com.  
-<!-- end list -->
+## 🔧 Bot-Befehle (v0.6.2)
+
+| Befehl | Rolle | Beschreibung |
+| :--- | :--- | :--- |
+| `/start` | Alle | Hauptmenü (rollenbasiert) |
+| `/myorders` | Kunde | Eigene Bestellhistorie & Deliverables Tresor öffnen |
+| `/feedbacks` | Kunde | Öffentliche Shop-Bewertungen einsehen |
+| `/allorders` | Admin/Master | Alle Kundenbestellungen auflisten |
+| `/allopenorders` | Admin/Master | Alle offenen Bestellungen auflisten |
+| `/orderid ORD-XXXX` | Admin/Master | Einzelne Bestellung im Admin-Panel öffnen |
+| `/deleteid ORD-XXXX` | Admin/Master | Bestellung löschen |
+| `/ban 123456789` | Admin/Master | User sperren |
+| `/addadmin 123456789` | Master | Admin hinzufügen |
+
+---
+
+## 🛡️ Sicherheit & Tech Stack
+
+- **Tech Stack**: Node.js (v18+), Telegraf v4, Supabase (PostgreSQL), Render.com.
+- **Sicherheits-Features**: Row Level Security (RLS), Privnote-Verschlüsselung, 48h Ban-Pending mit Master-Override, Anti-Flood Rate-Limiting.
 
 ---
 
