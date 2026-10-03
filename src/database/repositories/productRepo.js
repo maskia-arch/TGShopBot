@@ -119,6 +119,13 @@ const getProductById = async (productId) => {
     return data;
 };
 
+const getProductByName = async (name) => {
+    if (!name) return null;
+    const { data, error } = await supabase.from('products').select('*').eq('name', name).limit(1);
+    if (error || !data || data.length === 0) return null;
+    return data[0];
+};
+
 const addProduct = async (productData) => {
     const { categoryId, subcategoryId, name, description, price, isUnitPrice, fileId, deliveryOption, kycMode, kycOptions } = productData;
     const { data, error } = await supabase
@@ -232,7 +239,7 @@ const getAllProducts = async (isAdmin = false) => {
 module.exports = {
     getActiveCategories, addCategory, renameCategory, deleteCategory,
     updateCategorySortOrder, getProductsByCategory, getProductsBySubcategory,
-    getProductById, addProduct, deleteProduct, getAllProducts,
+    getProductById, getProductByName, addProduct, deleteProduct, getAllProducts,
     toggleProductStatus, updateProductCategory, updateProductImage, updateProductPrice,
     updateProductName, updateProductSortOrder, setDeliveryOption, updateProductDescription,
     setProductKyc

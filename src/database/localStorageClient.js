@@ -55,7 +55,8 @@ const TABLE_DEFAULTS = {
         is_active: true,
         wallet_address: null,
         auto_verify: false,
-        crypto_symbol: 'BTC'
+        crypto_symbol: 'BTC',
+        method_type: 'crypto'
     },
     carts: {
         quantity: 1,
@@ -126,7 +127,19 @@ const INITIAL_DB = {
             id: 'b1a2c3d4-0000-4000-8000-000000000001',
             name: 'Bitcoin / Crypto',
             wallet_address: 'bc1qdemo_wallet_address_for_local_testing_only',
-            is_active: true
+            is_active: true,
+            auto_verify: true,
+            crypto_symbol: 'BTC',
+            method_type: 'crypto'
+        },
+        {
+            id: 'b1a2c3d4-0000-4000-8000-000000000002',
+            name: '💵 Barzahlung bei Abholung / Übergabe',
+            wallet_address: 'Bitte passend in bar bereithalten.',
+            is_active: true,
+            auto_verify: false,
+            crypto_symbol: null,
+            method_type: 'cash'
         }
     ],
     carts: [],
@@ -437,9 +450,10 @@ class LocalQueryBuilder {
 
         // 4. OPERATION: DELETE
         if (this.opType === 'delete') {
+            const deleted = rows.filter(item => this._matchItem(item));
             db[this.tableName] = rows.filter(item => !this._matchItem(item));
             saveDbSync(db);
-            return { data: null, error: null };
+            return { data: deepClone(deleted), error: null };
         }
 
         // 5. OPERATION: SELECT

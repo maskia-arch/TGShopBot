@@ -212,15 +212,30 @@ module.exports = (bot) => {
         ctx.answerCbQuery().catch(() => {});
         try {
             const methods = await paymentRepo.getActivePaymentMethods();
-            const keyboard = methods.map(m => ([{
-                text: `${m.auto_verify ? '⚡' : '💳'} ${m.name}`,
-                callback_data: `master_view_pay_${m.id}`,
-                style: 'primary'
-            }]));
-            keyboard.push([{ text: '➕ ⚡ Auto-Krypto Zahlungsart', callback_data: 'master_add_auto_payment', style: 'success' }]);
-            keyboard.push([{ text: '➕ 💳 Manuelle Zahlungsart', callback_data: 'master_add_payment', style: 'primary' }]);
+            const keyboard = methods.map(m => {
+                let icon = '💳';
+                if (paymentRepo.isCashMethod(m)) icon = '💵';
+                else if (m.auto_verify) icon = '⚡';
+                return [{
+                    text: `${icon} ${m.name}`,
+                    callback_data: `master_view_pay_${m.id}`,
+                    style: 'primary'
+                }];
+            });
+            keyboard.push([{ text: '➕ 💵 Barzahlung einrichten (Physische Artikel)', callback_data: 'master_add_cash_payment', style: 'success' }]);
+            keyboard.push([{ text: '➕ ⚡ Auto-Krypto Zahlungsart', callback_data: 'master_add_auto_payment', style: 'primary' }]);
+            keyboard.push([{ text: '➕ 💳 Andere manuelle Zahlungsart', callback_data: 'master_add_payment', style: 'primary' }]);
             keyboard.push([{ text: '🔙 Zurück', callback_data: 'master_settings_hub', style: 'danger' }]);
             await uiHelper.updateOrSend(ctx, '💳 *Zahlungsarten verwalten*', { inline_keyboard: keyboard });
+        } catch (error) { 
+            console.error(error.message); 
+        }
+    });
+
+    bot.action('master_add_cash_payment', isMasterAdmin, async (ctx) => {
+        ctx.answerCbQuery().catch(() => {});
+        try {
+            await ctx.scene.enter('addPaymentMethodScene', { isCash: true });
         } catch (error) { 
             console.error(error.message); 
         }
@@ -250,6 +265,23 @@ module.exports = (bot) => {
             const method = await paymentRepo.getPaymentMethod(ctx.match[1]);
             if (!method) return ctx.answerCbQuery('Nicht gefunden.', { show_alert: true });
             
+            if (paymentRepo.isCashMethod(method)) {
+                let text = `💵 *${method.name}*\n\n`;
+                text += `📌 *Typ:* Barzahlung (Physische Artikel)\n`;
+                text += `ℹ️ *Status:* Aktiv ✅\n`;
+                text += `🚫 *Krypto-Sperre:* Bei physischen Artikeln wird Krypto automatisch ausgeblendet.\n`;
+                if (method.wallet_address) {
+                    text += `\n📝 *Kundenhinweis / Instruktion:*\n${method.wallet_address}\n`;
+                }
+                const keyboard = {
+                    inline_keyboard: [
+                        [{ text: '🗑 Zahlungsart löschen', callback_data: `master_del_pay_${method.id}`, style: 'danger' }],
+                        [{ text: '🔙 Zurück', callback_data: 'master_manage_payments', style: 'danger' }]
+                    ]
+                };
+                return await uiHelper.updateOrSend(ctx, text, keyboard);
+            }
+
             const icon = CRYPTO_ICONS[method.crypto_symbol] || '🪙';
             let text = `💳 *${method.name}*\n\n`;
             if (method.wallet_address) text += `📍 *Adresse:* \`${method.wallet_address}\`\n`;

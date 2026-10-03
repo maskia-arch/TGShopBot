@@ -42,7 +42,13 @@ module.exports = {
         if (data.deliveryMethod === 'shipping') text += `🚚 Lieferung: Versand\n`;
         else if (data.deliveryMethod === 'pickup') text += `🏪 Lieferung: Abholung\n`;
         if (data.shippingLink) text += `📦 Adresse: [Privnote öffnen](${data.shippingLink})\n`;
-        text += `\n📦 Status: *Offen* – Warte auf Zahlung`;
+        
+        const isCash = data.isCash || /bar|cash/i.test(data.paymentName);
+        if (isCash) {
+            text += `\n📦 Status: *Offen* – Barzahlung bei Übergabe / Abholung`;
+        } else {
+            text += `\n📦 Status: *Offen* – Warte auf Zahlung`;
+        }
         return text;
     },
 
@@ -73,15 +79,25 @@ module.exports = {
         text += `📋 *Order-ID:* \`#${data.orderId}\`\n`;
         text += `💶 *Euro-Betrag:* ${data.total} €\n`;
         text += `💳 *Zahlungsart:* ${data.paymentName}\n`;
-        if (data.walletAddress) {
-            text += `\n📍 *Zahlungsadresse:*\n\`${data.walletAddress}\`\n_(Tippe zum Kopieren)_\n`;
+        if (data.deliveryMethod === 'shipping') text += `🚚 *Lieferung:* Versand\n`;
+        else if (data.deliveryMethod === 'pickup') text += `🏪 *Lieferung:* Abholung vor Ort\n`;
+
+        const isCash = data.isCash || /bar|cash/i.test(data.paymentName);
+        if (isCash) {
+            text += `\n💵 *Zahlungshinweis:*\n`;
+            text += `Bitte halte den Betrag (*${data.total} €*) passend in bar bei Übergabe / Abholung bereit.`;
+            if (data.walletAddress) {
+                text += `\n\n📝 *Hinweis:* _${data.walletAddress}_`;
+            }
+        } else {
+            if (data.walletAddress) {
+                text += `\n📍 *Zahlungsadresse:*\n\`${data.walletAddress}\`\n_(Tippe zum Kopieren)_\n`;
+            }
+            if (data.cryptoAmountFormatted) {
+                text += `\n🪙 *Exakter Krypto-Betrag (inkl. Kennziffer):*\n\`${data.cryptoAmountFormatted}\`\n_(Tippe zum Kopieren)_\n`;
+            }
+            text += `\n\n⚠️ *Bitte überweise den geforderten Betrag und bestätige anschließend deine Zahlung.*`;
         }
-        if (data.cryptoAmountFormatted) {
-            text += `\n🪙 *Exakter Krypto-Betrag (inkl. Kennziffer):*\n\`${data.cryptoAmountFormatted}\`\n_(Tippe zum Kopieren)_\n`;
-        }
-        if (data.deliveryMethod === 'shipping') text += `\n🚚 *Lieferung:* Versand`;
-        else if (data.deliveryMethod === 'pickup') text += `\n🏪 *Lieferung:* Abholung`;
-        text += `\n\n⚠️ *Bitte überweise den geforderten Betrag und bestätige anschließend deine Zahlung.*`;
         return text;
     },
 

@@ -1,6 +1,7 @@
 const orderRepo = require('../../database/repositories/orderRepo');
 const userRepo = require('../../database/repositories/userRepo');
 const feedbackRepo = require('../../database/repositories/feedbackRepo');
+const paymentRepo = require('../../database/repositories/paymentRepo');
 const texts = require('../../utils/texts');
 const formatters = require('../../utils/formatters');
 const notificationService = require('../../services/notificationService');
@@ -38,8 +39,11 @@ module.exports = (bot) => {
                 }
                 text += `📅 ${date}\n\n`;
 
-                if (order.status === 'offen' && !order.tx_id) {
+                const isCash = paymentRepo.isCashMethod({ name: order.payment_method_name });
+                if (order.status === 'offen' && !order.tx_id && !isCash) {
                     keyboard.push([{ text: `💸 Zahlen: ${order.order_id}`, callback_data: `confirm_pay_${order.order_id}` }]);
+                } else if (order.status === 'offen' && isCash) {
+                    keyboard.push([{ text: `💵 Barzahlung Info: ${order.order_id}`, callback_data: `confirm_pay_${order.order_id}` }]);
                 }
 
                 keyboard.push([{ text: `📋 Bestellung #${order.order_id}`, callback_data: `cust_order_detail_${order.order_id}` }]);
@@ -266,8 +270,9 @@ module.exports = (bot) => {
             const paymentRepo = require('../../database/repositories/paymentRepo');
             const methods = await paymentRepo.getActivePaymentMethods();
             const paymentMethod = methods.find(m => m.name === order.payment_method_name || (order.payment_method_name && order.payment_method_name.includes(m.name)));
+            const isCash = paymentRepo.isCashMethod(paymentMethod) || paymentRepo.isCashMethod({ name: order.payment_method_name });
 
-            const isAutoVerify = (paymentMethod && paymentMethod.auto_verify) || !!order.payment_identifier;
+            const isAutoVerify = !isCash && ((paymentMethod && paymentMethod.auto_verify) || !!order.payment_identifier);
 
             let lastUpdate = order.last_rate_update || order.created_at;
             let baseTime = lastUpdate ? new Date(lastUpdate).getTime() : Date.now();
@@ -290,16 +295,17 @@ module.exports = (bot) => {
             const remainingStr = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
             const wallet = paymentMethod?.wallet_address || '';
-            const cryptoStr = order.crypto_amount || '';
-            const identifier = order.payment_identifier || '';
+            const cryptoStr = isCash ? '' : (order.crypto_amount || '');
+            const identifier = isCash ? '' : (order.payment_identifier || '');
 
             let invoiceText = texts.getCustomerInvoice({
                 orderId: order.order_id,
                 total: parseFloat(order.total_amount).toFixed(2),
-                paymentName: order.payment_method_name || 'Krypto',
+                paymentName: order.payment_method_name || (isCash ? '💵 Barzahlung' : 'Krypto'),
                 walletAddress: wallet,
                 deliveryMethod: order.delivery_method,
-                cryptoAmountFormatted: cryptoStr
+                cryptoAmountFormatted: cryptoStr,
+                isCash: isCash
             });
 
             if (isAutoVerify) {
@@ -322,7 +328,7 @@ module.exports = (bot) => {
                         { text: '🪙 Betrag kopieren', callback_data: `co_copy_amount_${order.order_id}` }
                     ]);
                 }
-            } else {
+            } else if (!isCash) {
                 keyboard.push([{ text: '🔑 TX-ID / Zahlungsbeleg eingeben', callback_data: `enter_optional_txid_${order.order_id}`, style: 'success' }]);
             }
 
@@ -394,6 +400,17 @@ module.exports = (bot) => {
             };
 
             await uiHelper.updateOrSend(ctx, liveText, liveKb);
+
+            // Sofortige Blockchain-Abfrage für diese spezifische Bestellung im Hintergrund anstoßen
+            const cryptoPaymentService = require('../../services/cryptoPaymentService');
+            cryptoPaymentService.scanSingleOrder(ctx.telegram ? { telegram: ctx.telegram } : bot, order).then(res => {
+                if (res && res.status === 'fulfilled') {
+                    ctx.reply(`⚡ *Zahlung soeben auf der Blockchain erkannt und bestätigt!*\n\nDeine Bestellung #${order.order_id} wurde erfolgreich freigeschaltet.`, {
+                        parse_mode: 'Markdown',
+                        reply_markup: { inline_keyboard: [[{ text: '📋 Meine Bestellungen', callback_data: 'my_orders' }]] }
+                    }).catch(() => {});
+                }
+            }).catch(() => {});
 
             const checkoutTickerService = require('../../services/checkoutTickerService');
             const messageId = ctx.callbackQuery?.message?.message_id;

@@ -42,7 +42,19 @@ const formatInvoice = (items, total, paymentMethod, orderId = null, extraOptions
     text += `💳 *Gewählte Zahlungsart:* ${safePaymentName}\n`;
 
     if (isReview) {
-        text += `\nℹ️ *Hinweis zum Checkout:*\n_Mit Klick auf "Bestellung abschicken" wird deine Bestellung verbindlich übermittelt, der tagesaktuelle Krypto-Wechselkurs berechnet und deine persönliche Zahlungsadresse zum Kopieren freigeschaltet._\n`;
+        if (extraOptions.isCash) {
+            text += `\nℹ️ *Hinweis zum Checkout:*\n_Mit Klick auf "Bestellung abschicken" wird deine Bestellung verbindlich übermittelt. Die Bezahlung erfolgt in bar bei Übergabe / Abholung._\n`;
+        } else {
+            text += `\nℹ️ *Hinweis zum Checkout:*\n_Mit Klick auf "Bestellung abschicken" wird deine Bestellung verbindlich übermittelt, der tagesaktuelle Krypto-Wechselkurs berechnet und deine persönliche Zahlungsadresse zum Kopieren freigeschaltet._\n`;
+        }
+        return text;
+    }
+
+    if (extraOptions.isCash) {
+        text += `\n💵 *Barzahlung bei Übergabe / Abholung*\n`;
+        if (paymentMethod && paymentMethod.wallet_address) {
+            text += `📝 *Hinweis:* _${escapeMarkdown(paymentMethod.wallet_address)}_\n`;
+        }
         return text;
     }
 
